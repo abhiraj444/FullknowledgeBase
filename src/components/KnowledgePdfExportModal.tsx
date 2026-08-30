@@ -18,7 +18,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Printer,
   FileDown,
-  Layers,
+  Download,
+  Loader2,
   Sparkles,
   PenTool,
   Check,
@@ -28,7 +29,11 @@ import {
   Settings2,
 } from 'lucide-react';
 import type { KnowledgeMapData, KnowledgeTreeNode } from '@/types';
-import ClinicalMarkdownRenderer from './ClinicalMarkdownRenderer';
+import { useToast } from '@/hooks/use-toast';
+import { jsPDF } from 'jspdf';
+import { registerNotoSansRegular } from '@/lib/pdf-fonts/NotoSansRegular';
+import { registerNotoSansBold } from '@/lib/pdf-fonts/NotoSansBold';
+import { registerNotoSansItalic } from '@/lib/pdf-fonts/NotoSansItalic';
 
 interface KnowledgePdfExportModalProps {
   isOpen: boolean;
@@ -51,36 +56,44 @@ function escapeHtml(str: string): string {
 }
 
 /**
+ * Strips basic markdown markers to clean plain text for PDF generation.
+ */
+function stripMarkdown(md: string): string {
+  if (!md) return '';
+  return md
+    .replace(/\\text\{([^}]+)\}/g, '$1')
+    .replace(/\\mathrm\{([^}]+)\}/g, '$1')
+    .replace(/\\mathbf\{([^}]+)\}/g, '$1')
+    .replace(/\\textbf\{([^}]+)\}/g, '$1')
+    .replace(/\\ge\b/g, '≥')
+    .replace(/\\le\b/g, '≤')
+    .replace(/\\rightarrow\b/g, '→')
+    .replace(/\\leftarrow\b/g, '←')
+    .replace(/\\degree\b/g, '°')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^#+\s+/gm, '')
+    .replace(/^[-*]\s+/gm, '• ')
+    .trim();
+}
+
+/**
  * Converts basic markdown formatting to clean semantic HTML for printing.
  */
 function simpleMarkdownToHtml(md: string): string {
   if (!md) return '';
-  
-  // Clean raw LaTeX or double escaped backslashes
+
   let text = md
     .replace(/\\text\{([^}]+)\}/g, '$1')
     .replace(/\\mathrm\{([^}]+)\}/g, '$1')
     .replace(/\\mathbf\{([^}]+)\}/g, '<strong>$1</strong>')
     .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
-    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
     .replace(/\\ge\b/g, '≥')
     .replace(/\\le\b/g, '≤')
-    .replace(/\\pm\b/g, '±')
-    .replace(/\\approx\b/g, '≈')
-    .replace(/\\times\b/g, '×')
-    .replace(/\\cdot\b/g, '·')
     .replace(/\\rightarrow\b/g, '→')
     .replace(/\\leftarrow\b/g, '←')
-    .replace(/\\uparrow\b/g, '↑')
-    .replace(/\\downarrow\b/g, '↓')
-    .replace(/\\Delta\b/g, 'Δ')
-    .replace(/\\degree\b/g, '°')
-    .replace(/\\circ\b/g, '°');
-
-  // Handle display formulas $$ ... $$
-  text = text.replace(/\$\$([^$]+)\$\$/g, (_, eq) => {
-    return `\n\n<div style="text-align: center; margin: 8px 0; padding: 6px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-family: 'Times New Roman', serif; font-size: 10.5pt; font-style: italic; color: #0f172a;">${formatMathString(eq)}</div>\n\n`;
-  });
+    .replace(/\\degree\b/g, '°');
 
   const lines = text.split('\n');
   const htmlLines: string[] = [];
@@ -97,45 +110,65 @@ function simpleMarkdownToHtml(md: string): string {
       continue;
     }
 
-    // Pass-through preformatted display divs
-    if (trimmed.startsWith('<div style="text-align: center;')) {
-      if (inList) { htmlLines.push('</ul>'); inList = false; }
-      htmlLines.push(trimmed);
-      continue;
-    }
-
-    // Headings
     if (trimmed.startsWith('### ')) {
-      if (inList) { htmlLines.push('</ul>'); inList = false; }
-      htmlLines.push(`<h4 style="margin: 8px 0 4px 0; font-size: 10pt; font-weight: 700; color: #1e293b;">${formatInline(trimmed.slice(4))}</h4>`);
+      if (inList) {
+        htmlLines.push('</ul>');
+        inList = false;
+      }
+      htmlLines.push(
+        `<h4 style="margin: 8px 0 4px 0; font-size: 10pt; font-weight: 700; color: #1e293b;">${formatInline(
+          trimmed.slice(4)
+        )}</h4>`
+      );
       continue;
     }
     if (trimmed.startsWith('## ')) {
-      if (inList) { htmlLines.push('</ul>'); inList = false; }
-      htmlLines.push(`<h3 style="margin: 10px 0 4px 0; font-size: 11pt; font-weight: 700; color: #0f172a;">${formatInline(trimmed.slice(3))}</h3>`);
+      if (inList) {
+        htmlLines.push('</ul>');
+        inList = false;
+      }
+      htmlLines.push(
+        `<h3 style="margin: 10px 0 4px 0; font-size: 11pt; font-weight: 700; color: #0f172a;">${formatInline(
+          trimmed.slice(3)
+        )}</h3>`
+      );
       continue;
     }
     if (trimmed.startsWith('# ')) {
-      if (inList) { htmlLines.push('</ul>'); inList = false; }
-      htmlLines.push(`<h2 style="margin: 12px 0 6px 0; font-size: 12pt; font-weight: 800; color: #0f172a;">${formatInline(trimmed.slice(2))}</h2>`);
+      if (inList) {
+        htmlLines.push('</ul>');
+        inList = false;
+      }
+      htmlLines.push(
+        `<h2 style="margin: 12px 0 6px 0; font-size: 12pt; font-weight: 800; color: #0f172a;">${formatInline(
+          trimmed.slice(2)
+        )}</h2>`
+      );
       continue;
     }
 
-    // Unordered Lists
     if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
       if (!inList) {
-        htmlLines.push('<ul style="margin: 4px 0; padding-left: 20px; font-size: 9.5pt; color: #334155; line-height: 1.45;">');
+        htmlLines.push(
+          '<ul style="margin: 4px 0; padding-left: 20px; font-size: 9.5pt; color: #334155; line-height: 1.45;">'
+        );
         inList = true;
       }
       htmlLines.push(`<li style="margin-bottom: 3px;">${formatInline(trimmed.slice(2))}</li>`);
       continue;
     }
 
-    // Numbered lists
     const numMatch = trimmed.match(/^(\d+)\.\s+(.*)/);
     if (numMatch) {
-      if (inList) { htmlLines.push('</ul>'); inList = false; }
-      htmlLines.push(`<div style="margin: 3px 0; padding-left: 6px; font-size: 9.5pt; color: #334155;"><span style="font-weight: 700; color: #1e293b;">${numMatch[1]}.</span> ${formatInline(numMatch[2])}</div>`);
+      if (inList) {
+        htmlLines.push('</ul>');
+        inList = false;
+      }
+      htmlLines.push(
+        `<div style="margin: 3px 0; padding-left: 6px; font-size: 9.5pt; color: #334155;"><span style="font-weight: 700; color: #1e293b;">${
+          numMatch[1]
+        }.</span> ${formatInline(numMatch[2])}</div>`
+      );
       continue;
     }
 
@@ -144,8 +177,11 @@ function simpleMarkdownToHtml(md: string): string {
       inList = false;
     }
 
-    // Normal paragraph
-    htmlLines.push(`<p style="margin: 4px 0; font-size: 9.5pt; color: #334155; line-height: 1.45;">${formatInline(trimmed)}</p>`);
+    htmlLines.push(
+      `<p style="margin: 4px 0; font-size: 9.5pt; color: #334155; line-height: 1.45;">${formatInline(
+        trimmed
+      )}</p>`
+    );
   }
 
   if (inList) {
@@ -155,36 +191,14 @@ function simpleMarkdownToHtml(md: string): string {
   return htmlLines.join('\n');
 }
 
-function formatMathString(math: string): string {
-  return math
-    .replace(/\\mathrm\{([^}]+)\}/g, '$1')
-    .replace(/\\text\{([^}]+)\}/g, '$1')
-    .replace(/\\mathbf\{([^}]+)\}/g, '<strong>$1</strong>')
-    .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
-    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
-    .replace(/_\{([^}]+)\}/g, '<sub>$1</sub>')
-    .replace(/_([a-zA-Z0-9])/g, '<sub>$1</sub>')
-    .replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>')
-    .replace(/\^([a-zA-Z0-9+-])/g, '<sup>$1</sup>')
-    .replace(/\\approx/g, '≈')
-    .replace(/\\times/g, '×')
-    .replace(/\\ge/g, '≥')
-    .replace(/\\le/g, '≤')
-    .replace(/\\pm/g, '±')
-    .replace(/\\uparrow/g, '↑')
-    .replace(/\\downarrow/g, '↓');
-}
-
 function formatInline(str: string): string {
-  // Convert inline math $...$ to styled formula
-  let res = str.replace(/\$([^$]+)\$/g, (_, math) => {
-    return `<span style="font-family: 'Times New Roman', serif; font-style: italic; color: #0f172a;">${formatMathString(math)}</span>`;
-  });
-
-  return res
+  return str
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code style="background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 8.5pt;">$1</code>');
+    .replace(
+      /`([^`]+)`/g,
+      '<code style="background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 8.5pt;">$1</code>'
+    );
 }
 
 export function KnowledgePdfExportModal({
@@ -193,6 +207,8 @@ export function KnowledgePdfExportModal({
   knowledgeMap,
   activeNodeId,
 }: KnowledgePdfExportModalProps) {
+  const { toast } = useToast();
+
   // Export Configurations
   const [includeSummary, setIncludeSummary] = useState(true);
   const [includeExplanations, setIncludeExplanations] = useState(true);
@@ -200,9 +216,10 @@ export function KnowledgePdfExportModal({
   const [includeUserNotes, setIncludeUserNotes] = useState(true);
   const [scope, setScope] = useState<'all' | 'selected'>('all');
   const [activeTab, setActiveTab] = useState<'settings' | 'preview'>('settings');
-  
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+
   // Handwritten Notes Ruling Settings
-  const [noteLineCount, setNoteLineCount] = useState<number>(5);
+  const [noteLineCount, setNoteLineCount] = useState<number>(4);
   const [rulingStyle, setRulingStyle] = useState<'ruled' | 'dotted' | 'box' | 'none'>('ruled');
 
   const activeNode = useMemo(() => {
@@ -213,8 +230,346 @@ export function KnowledgePdfExportModal({
     return scope === 'selected' && activeNode ? [activeNode] : knowledgeMap.tree;
   }, [scope, activeNode, knowledgeMap.tree]);
 
-  // Count total nodes in export scope
   const totalExportNodes = countNodes(targetTree);
+
+  /**
+   * Generates a direct PDF document using jsPDF with proper page breaks and typography.
+   */
+  const handleDownloadDirectPdf = async () => {
+    if (!targetTree || targetTree.length === 0) {
+      toast({
+        title: 'Empty Knowledge Map',
+        description: 'No topics found to export.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsGeneratingPdf(true);
+    try {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      registerNotoSansRegular(doc);
+      registerNotoSansBold(doc);
+      registerNotoSansItalic(doc);
+      doc.setFont('NotoSans', 'normal');
+
+      const margin = 14;
+      let currentY = margin;
+      const pageWidth = doc.internal.pageSize.width;
+      const pageHeight = doc.internal.pageSize.height;
+      const contentWidth = pageWidth - 2 * margin;
+      const bottomLimit = pageHeight - margin - 8;
+
+      let pageCount = 1;
+
+      const checkPageBreak = (neededHeight: number) => {
+        if (currentY + neededHeight > bottomLimit) {
+          doc.addPage();
+          pageCount += 1;
+          currentY = margin + 4;
+          // Mini running header
+          doc.setFont('NotoSans', 'normal');
+          doc.setFontSize(7.5);
+          doc.setTextColor(148, 163, 184);
+          doc.text(
+            `${knowledgeMap.title || 'Knowledge Study Guide'} • MediGen AI`,
+            margin,
+            currentY - 2
+          );
+          doc.setDrawColor(226, 232, 240);
+          doc.line(margin, currentY, pageWidth - margin, currentY);
+          currentY += 5;
+        }
+      };
+
+      // 1. Header Banner
+      doc.setFillColor(30, 58, 138); // Navy Blue
+      doc.rect(margin, currentY, contentWidth, 18, 'F');
+
+      doc.setFont('NotoSans', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(255, 255, 255);
+      doc.text('MEDIGEN KNOWLEDGE MAP & STUDY GUIDE', margin + 4, currentY + 6.5);
+
+      doc.setFont('NotoSans', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(200, 220, 255);
+      const subheader = `${knowledgeMap.title || 'Study Outline'} | ${totalExportNodes} Analyzed Topics | Generated: ${new Date().toLocaleDateString()}`;
+      doc.text(doc.splitTextToSize(subheader, contentWidth - 8)[0], margin + 4, currentY + 13);
+
+      currentY += 23;
+
+      // 2. High-Yield Document Summary
+      if (includeSummary && knowledgeMap.documentSummary) {
+        doc.setFont('NotoSans', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(15, 23, 42);
+
+        const summaryRaw = stripMarkdown(knowledgeMap.documentSummary);
+        doc.setFont('NotoSans', 'normal');
+        doc.setFontSize(8.5);
+        const summaryLines = doc.splitTextToSize(summaryRaw, contentWidth - 8);
+        const boxHeight = Math.max(summaryLines.length * 4.2 + 10, 16);
+
+        checkPageBreak(boxHeight + 4);
+
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(203, 213, 225);
+        doc.roundedRect(margin, currentY, contentWidth, boxHeight, 2, 2, 'FD');
+
+        doc.setFont('NotoSans', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(30, 41, 59);
+        doc.text('HIGH-YIELD SYNTHESIS & CLINICAL THEMES', margin + 4, currentY + 5.5);
+
+        doc.setFont('NotoSans', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(51, 65, 85);
+        doc.text(summaryLines, margin + 4, currentY + 10.5);
+
+        currentY += boxHeight + 6;
+      }
+
+      // 3. Syllabus Topic Index
+      doc.setFont('NotoSans', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(15, 23, 42);
+      checkPageBreak(12);
+      doc.text(`SYLLABUS TOPIC INDEX (${totalExportNodes} Concepts)`, margin, currentY);
+      currentY += 4;
+      doc.setDrawColor(203, 213, 225);
+      doc.line(margin, currentY, pageWidth - margin, currentY);
+      currentY += 4;
+
+      targetTree.forEach((root, idx) => {
+        checkPageBreak(8);
+        doc.setFont('NotoSans', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(30, 58, 138);
+        doc.text(`${idx + 1}. ${root.title}`, margin + 2, currentY);
+        currentY += 4.5;
+
+        if (root.children && root.children.length > 0) {
+          root.children.forEach((sub, sIdx) => {
+            checkPageBreak(6);
+            doc.setFont('NotoSans', 'normal');
+            doc.setFontSize(8);
+            doc.setTextColor(71, 85, 105);
+            doc.text(`${idx + 1}.${sIdx + 1} ${sub.title}`, margin + 6, currentY);
+            currentY += 4;
+          });
+        }
+      });
+
+      currentY += 6;
+
+      // 4. Detailed Hierarchical Breakdown
+      checkPageBreak(12);
+      doc.setFont('NotoSans', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42);
+      doc.text('DETAILED TOPIC DECONSTRUCTIONS & EXPLANATIONS', margin, currentY);
+      currentY += 4;
+      doc.setDrawColor(15, 23, 42);
+      doc.line(margin, currentY, pageWidth - margin, currentY);
+      currentY += 6;
+
+      const renderPdfNode = (node: KnowledgeTreeNode, prefix: string, indent: number = 0) => {
+        const isRoot = node.depth === 0;
+        const isSub = node.depth === 1;
+
+        // Node Title
+        checkPageBreak(14);
+        doc.setFont('NotoSans', 'bold');
+        doc.setFontSize(isRoot ? 10.5 : isSub ? 9.5 : 8.5);
+        doc.setTextColor(isRoot ? 30 : isSub ? 2 : 71, isRoot ? 58 : isSub ? 132 : 85, isRoot ? 138 : isSub ? 199 : 105);
+
+        let titleStr = `${prefix} ${node.title}`;
+        if (node.pyqTag) {
+          titleStr += `  [${node.pyqTag}]`;
+        }
+        const titleLines = doc.splitTextToSize(titleStr, contentWidth - indent - 4);
+        doc.text(titleLines, margin + indent, currentY);
+        currentY += titleLines.length * (isRoot ? 5 : 4.2) + 1;
+
+        // Node Description
+        if (node.description) {
+          doc.setFont('NotoSans', 'italic');
+          doc.setFontSize(8);
+          doc.setTextColor(100, 116, 139);
+          const descLines = doc.splitTextToSize(node.description, contentWidth - indent - 4);
+          checkPageBreak(descLines.length * 3.8 + 2);
+          doc.text(descLines, margin + indent + 2, currentY);
+          currentY += descLines.length * 3.8 + 2;
+        }
+
+        // First Principle Anchor Callout
+        if (node.firstPrincipleAnchor) {
+          doc.setFont('NotoSans', 'normal');
+          doc.setFontSize(8);
+          const anchorRaw = `⚡ First-Principle Anchor: ${node.firstPrincipleAnchor}`;
+          const anchorLines = doc.splitTextToSize(anchorRaw, contentWidth - indent - 8);
+          const anchorHeight = anchorLines.length * 3.8 + 5;
+
+          checkPageBreak(anchorHeight + 3);
+
+          doc.setFillColor(255, 251, 235); // Light Amber
+          doc.setDrawColor(253, 230, 138);
+          doc.roundedRect(margin + indent, currentY, contentWidth - indent, anchorHeight, 1.5, 1.5, 'FD');
+
+          doc.setTextColor(146, 64, 14);
+          doc.text(anchorLines, margin + indent + 3, currentY + 4);
+          currentY += anchorHeight + 3;
+        }
+
+        // Standard Explanation
+        if (includeExplanations && node.explanation?.standard) {
+          const expRaw = stripMarkdown(node.explanation.standard);
+          doc.setFont('NotoSans', 'normal');
+          doc.setFontSize(7.8);
+          const expLines = doc.splitTextToSize(expRaw, contentWidth - indent - 8);
+          const expHeight = expLines.length * 3.6 + 6;
+
+          checkPageBreak(Math.min(expHeight, 40));
+
+          doc.setFillColor(248, 250, 252);
+          doc.setDrawColor(226, 232, 240);
+          doc.roundedRect(margin + indent, currentY, contentWidth - indent, expHeight, 1.5, 1.5, 'FD');
+
+          doc.setFont('NotoSans', 'bold');
+          doc.setTextColor(30, 41, 59);
+          doc.text('📖 Clinical Pathway & Explanation:', margin + indent + 3, currentY + 4);
+
+          doc.setFont('NotoSans', 'normal');
+          doc.setTextColor(51, 65, 85);
+          doc.text(expLines, margin + indent + 3, currentY + 8);
+          currentY += expHeight + 3;
+        }
+
+        // First-Principles Explanation
+        if (includeFirstPrinciples && node.explanation?.firstPrinciples) {
+          const fpRaw = stripMarkdown(node.explanation.firstPrinciples);
+          doc.setFont('NotoSans', 'normal');
+          doc.setFontSize(7.8);
+          const fpLines = doc.splitTextToSize(fpRaw, contentWidth - indent - 8);
+          const fpHeight = fpLines.length * 3.6 + 6;
+
+          checkPageBreak(Math.min(fpHeight, 40));
+
+          doc.setFillColor(255, 253, 245);
+          doc.setDrawColor(254, 215, 170);
+          doc.roundedRect(margin + indent, currentY, contentWidth - indent, fpHeight, 1.5, 1.5, 'FD');
+
+          doc.setFont('NotoSans', 'bold');
+          doc.setTextColor(154, 52, 18);
+          doc.text('🔬 First-Principles Derivation:', margin + indent + 3, currentY + 4);
+
+          doc.setFont('NotoSans', 'normal');
+          doc.setTextColor(124, 45, 18);
+          doc.text(fpLines, margin + indent + 3, currentY + 8);
+          currentY += fpHeight + 3;
+        }
+
+        // User Personal Notes
+        if (includeUserNotes && node.explanation?.userNotes) {
+          const unRaw = stripMarkdown(node.explanation.userNotes);
+          doc.setFont('NotoSans', 'normal');
+          doc.setFontSize(7.8);
+          const unLines = doc.splitTextToSize(unRaw, contentWidth - indent - 8);
+          const unHeight = unLines.length * 3.6 + 6;
+
+          checkPageBreak(Math.min(unHeight, 35));
+
+          doc.setFillColor(250, 245, 255);
+          doc.setDrawColor(233, 213, 255);
+          doc.roundedRect(margin + indent, currentY, contentWidth - indent, unHeight, 1.5, 1.5, 'FD');
+
+          doc.setFont('NotoSans', 'bold');
+          doc.setTextColor(107, 33, 168);
+          doc.text('📝 Personal Study Notes:', margin + indent + 3, currentY + 4);
+
+          doc.setFont('NotoSans', 'italic');
+          doc.setTextColor(88, 28, 135);
+          doc.text(unLines, margin + indent + 3, currentY + 8);
+          currentY += unHeight + 3;
+        }
+
+        // Handwritten Annotation Space (Ruled Lines) - only on subtopics / key concepts
+        if (noteLineCount > 0 && isSub) {
+          const rulingHeight = noteLineCount * 5 + 4;
+          checkPageBreak(rulingHeight + 4);
+
+          doc.setFont('NotoSans', 'bold');
+          doc.setFontSize(7);
+          doc.setTextColor(148, 163, 184);
+          doc.text('✍️ ANNOTATIONS & LECTURE NOTES', margin + indent + 2, currentY + 3);
+          currentY += 4.5;
+
+          doc.setDrawColor(203, 213, 225);
+          if (rulingStyle === 'ruled') {
+            for (let l = 0; l < noteLineCount; l++) {
+              doc.setLineDashPattern([1.5, 1.5], 0);
+              doc.line(margin + indent, currentY, pageWidth - margin, currentY);
+              currentY += 5;
+            }
+            doc.setLineDashPattern([], 0); // reset
+          } else if (rulingStyle === 'box') {
+            doc.setDrawColor(203, 213, 225);
+            doc.roundedRect(margin + indent, currentY, contentWidth - indent, noteLineCount * 5, 1.5, 1.5, 'D');
+            currentY += noteLineCount * 5 + 2;
+          }
+          currentY += 2;
+        }
+
+        // Render Children Recursively
+        if (node.children && node.children.length > 0) {
+          node.children.forEach((child, cIdx) => {
+            renderPdfNode(child, `${prefix}.${cIdx + 1}`, Math.min(indent + 6, 18));
+          });
+        }
+
+        currentY += 3;
+      };
+
+      targetTree.forEach((root, rIdx) => {
+        renderPdfNode(root, `${rIdx + 1}.`, 0);
+      });
+
+      // 5. Add Page Numbers
+      const totalPages = (doc.internal as any).getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFont('NotoSans', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `Page ${i} of ${totalPages}  •  MediGen First-Principles Clinical AI  •  Confidential`,
+          pageWidth / 2,
+          pageHeight - 6,
+          { align: 'center' }
+        );
+      }
+
+      const cleanTitle = (knowledgeMap.title || 'knowledge_map')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_');
+      doc.save(`${cleanTitle}_study_guide.pdf`);
+
+      toast({
+        title: 'PDF Downloaded',
+        description: `Successfully exported ${totalExportNodes} topics into your study guide.`,
+      });
+    } catch (err) {
+      console.error('PDF generation error:', err);
+      toast({
+        title: 'Export Failed',
+        description: 'Failed to generate PDF document. Please try printing via browser.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
 
   /**
    * Generates the self-contained, standalone printable HTML document.
@@ -229,29 +584,29 @@ export function KnowledgePdfExportModal({
       const isLevel1 = node.depth === 1;
 
       let rulingHtml = '';
-      if (noteLineCount > 0) {
+      if (noteLineCount > 0 && isLevel1) {
         if (rulingStyle === 'ruled') {
           const lines = Array.from({ length: noteLineCount })
-            .map(() => '<div style="height: 22px; border-bottom: 1px dashed #cbd5e1;"></div>')
+            .map(() => '<div style="height: 20px; border-bottom: 1px dashed #cbd5e1;"></div>')
             .join('');
           rulingHtml = `
-            <div style="margin-top: 8px;">
-              <div style="font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 4px;">✍️ Student Notes & Clinical Annotations</div>
+            <div style="margin-top: 6px; page-break-inside: avoid; break-inside: avoid;">
+              <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 2px;">✍️ Student Notes &amp; Formula Space</div>
               ${lines}
             </div>
           `;
         } else if (rulingStyle === 'dotted') {
           rulingHtml = `
-            <div style="margin-top: 8px;">
-              <div style="font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 4px;">✍️ Scratchpad & Formula Grid</div>
-              <div style="height: ${Math.max(noteLineCount * 18, 50)}px; border: 1px solid #cbd5e1; border-radius: 4px; background-image: radial-gradient(circle, #94a3b8 1px, transparent 1px); background-size: 14px 14px;"></div>
+            <div style="margin-top: 6px; page-break-inside: avoid; break-inside: avoid;">
+              <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 2px;">✍️ Scratchpad &amp; Grid</div>
+              <div style="height: ${Math.max(noteLineCount * 16, 40)}px; border: 1px solid #cbd5e1; border-radius: 4px; background-image: radial-gradient(circle, #94a3b8 1px, transparent 1px); background-size: 12px 12px;"></div>
             </div>
           `;
         } else if (rulingStyle === 'box') {
           rulingHtml = `
-            <div style="margin-top: 8px;">
-              <div style="font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 4px;">✍️ Sketched Diagram Frame</div>
-              <div style="height: ${Math.max(noteLineCount * 18, 50)}px; border: 1px dashed #94a3b8; border-radius: 4px; background: #fafafa;"></div>
+            <div style="margin-top: 6px; page-break-inside: avoid; break-inside: avoid;">
+              <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 2px;">✍️ Sketched Diagram Frame</div>
+              <div style="height: ${Math.max(noteLineCount * 16, 40)}px; border: 1px dashed #94a3b8; border-radius: 4px; background: #fafafa;"></div>
             </div>
           `;
         }
@@ -265,7 +620,9 @@ export function KnowledgePdfExportModal({
       }
 
       const tagHtml = node.pyqTag
-        ? `<span style="display: inline-block; font-size: 7.5pt; font-weight: 700; font-family: monospace; border: 1px solid #475569; color: #1e293b; padding: 1px 5px; border-radius: 3px; margin-left: 6px;">[${escapeHtml(node.pyqTag)}]</span>`
+        ? `<span style="display: inline-block; font-size: 7.5pt; font-weight: 700; font-family: monospace; border: 1px solid #475569; color: #1e293b; padding: 1px 5px; border-radius: 3px; margin-left: 6px;">[${escapeHtml(
+            node.pyqTag
+          )}]</span>`
         : '';
 
       const borderLeftColor = isRoot ? '#2563eb' : isLevel1 ? '#0284c7' : '#94a3b8';
@@ -273,54 +630,87 @@ export function KnowledgePdfExportModal({
       const headingFontWeight = isRoot ? '800' : isLevel1 ? '700' : '600';
 
       return `
-        <div style="page-break-inside: avoid; break-inside: avoid; border-left: 3px solid ${borderLeftColor}; padding-left: 12px; margin-bottom: 14px; margin-top: ${isRoot ? '18px' : '8px'};">
-          <div style="font-size: ${headingFontSize}; font-weight: ${headingFontWeight}; color: #0f172a; line-height: 1.3;">
-            <span style="font-family: monospace; color: #64748b; margin-right: 4px;">${prefix}.</span>
-            <span>${escapeHtml(node.title)}</span>
-            ${tagHtml}
+        <div style="border-left: 3px solid ${borderLeftColor}; padding-left: 12px; margin-bottom: 12px; margin-top: ${
+        isRoot ? '16px' : '6px'
+      };">
+          <div style="page-break-inside: avoid; break-inside: avoid;">
+            <div style="font-size: ${headingFontSize}; font-weight: ${headingFontWeight}; color: #0f172a; line-height: 1.3;">
+              <span style="font-family: monospace; color: #64748b; margin-right: 4px;">${prefix}</span>
+              <span>${escapeHtml(node.title)}</span>
+              ${tagHtml}
+            </div>
+
+            ${
+              node.description
+                ? `<p style="font-size: 9pt; color: #475569; font-style: italic; margin: 3px 0 5px 0; line-height: 1.35;">${escapeHtml(
+                    node.description
+                  )}</p>`
+                : ''
+            }
+
+            ${
+              node.firstPrincipleAnchor
+                ? `
+              <div style="background: #fffbeb; border: 1px solid #fef3c7; border-left: 3px solid #d97706; border-radius: 4px; padding: 5px 8px; margin: 4px 0; font-size: 8.5pt; color: #78350f;">
+                <strong style="color: #92400e;">⚡ First-Principle Anchor:</strong> ${escapeHtml(
+                  node.firstPrincipleAnchor
+                )}
+              </div>
+            `
+                : ''
+            }
+
+            ${
+              includeExplanations && hasExplanation
+                ? `
+              <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px 8px; margin: 4px 0;">
+                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #475569; margin-bottom: 3px;">📖 Standard Explanation &amp; Clinical Pathway:</div>
+                ${simpleMarkdownToHtml(node.explanation!.standard!)}
+              </div>
+            `
+                : ''
+            }
+
+            ${
+              includeFirstPrinciples && hasFirstPrinciples
+                ? `
+              <div style="background: #fffdf5; border: 1px solid #fed7aa; border-left: 3px solid #f97316; border-radius: 4px; padding: 6px 8px; margin: 4px 0;">
+                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #9a3412; margin-bottom: 3px;">🔬 First-Principles Derivation:</div>
+                ${simpleMarkdownToHtml(node.explanation!.firstPrinciples!)}
+              </div>
+            `
+                : ''
+            }
+
+            ${
+              includeUserNotes && hasUserNotes
+                ? `
+              <div style="background: #faf5ff; border: 1px solid #e9d5ff; border-left: 3px solid #9333ea; border-radius: 4px; padding: 5px 8px; margin: 4px 0;">
+                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #6b21a8; margin-bottom: 2px;">📝 Digital Notes:</div>
+                <div style="font-size: 8.5pt; color: #581c87; font-family: Georgia, serif;">${escapeHtml(
+                  node.explanation!.userNotes!
+                )}</div>
+              </div>
+            `
+                : ''
+            }
+
+            ${rulingHtml}
           </div>
 
-          ${node.description ? `<p style="font-size: 9pt; color: #475569; font-style: italic; margin: 4px 0 6px 0; line-height: 1.35;">${escapeHtml(node.description)}</p>` : ''}
-
-          ${node.firstPrincipleAnchor ? `
-            <div style="background: #fffbeb; border: 1px solid #fef3c7; border-left: 3px solid #d97706; border-radius: 4px; padding: 6px 10px; margin: 6px 0; font-size: 9pt; color: #78350f;">
-              <strong style="color: #92400e;">⚡ First-Principle Anchor:</strong> ${escapeHtml(node.firstPrincipleAnchor)}
-            </div>
-          ` : ''}
-
-          ${includeExplanations && hasExplanation ? `
-            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px 10px; margin: 6px 0;">
-              <div style="font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #475569; margin-bottom: 4px;">📖 Standard Explanation & Clinical Pathway:</div>
-              ${simpleMarkdownToHtml(node.explanation!.standard!)}
-            </div>
-          ` : ''}
-
-          ${includeFirstPrinciples && hasFirstPrinciples ? `
-            <div style="background: #fffdf5; border: 1px solid #fed7aa; border-left: 3px solid #f97316; border-radius: 4px; padding: 8px 10px; margin: 6px 0;">
-              <div style="font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #9a3412; margin-bottom: 4px;">🔬 First-Principles Derivation:</div>
-              ${simpleMarkdownToHtml(node.explanation!.firstPrinciples!)}
-            </div>
-          ` : ''}
-
-          ${includeUserNotes && hasUserNotes ? `
-            <div style="background: #faf5ff; border: 1px solid #e9d5ff; border-left: 3px solid #9333ea; border-radius: 4px; padding: 6px 10px; margin: 6px 0;">
-              <div style="font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #6b21a8; margin-bottom: 2px;">📝 Digital Notes:</div>
-              <div style="font-size: 9pt; color: #581c87; font-family: Georgia, serif;">${escapeHtml(node.explanation!.userNotes!)}</div>
-            </div>
-          ` : ''}
-
-          ${rulingHtml}
-
-          ${childrenHtml ? `<div style="padding-left: 6px; margin-top: 6px;">${childrenHtml}</div>` : ''}
+          ${
+            childrenHtml
+              ? `<div style="padding-left: 6px; margin-top: 4px;">${childrenHtml}</div>`
+              : ''
+          }
         </div>
       `;
     };
 
     const treeContentHtml = targetTree
-      .map((node, index) => renderNodeHtml(node, `${index + 1}`))
+      .map((node, index) => renderNodeHtml(node, `${index + 1}.`))
       .join('\n');
 
-    // Syllabus index
     const syllabusHtml = targetTree
       .map((root, i) => {
         let subItems = '';
@@ -330,7 +720,12 @@ export function KnowledgePdfExportModal({
               let leafItems = '';
               if (sub.children && sub.children.length > 0) {
                 leafItems = sub.children
-                  .map((leaf, k) => `<div style="padding-left: 16px; font-size: 8.5pt; color: #64748b;">${i + 1}.${j + 1}.${k + 1} ${escapeHtml(leaf.title)}</div>`)
+                  .map(
+                    (leaf, k) =>
+                      `<div style="padding-left: 16px; font-size: 8.5pt; color: #64748b;">${i + 1}.${
+                        j + 1
+                      }.${k + 1} ${escapeHtml(leaf.title)}</div>`
+                  )
                   .join('');
               }
               return `
@@ -344,7 +739,9 @@ export function KnowledgePdfExportModal({
         }
         return `
           <div style="margin-bottom: 6px;">
-            <div style="font-weight: 700; font-size: 9.5pt; color: #0f172a;">${i + 1}. ${escapeHtml(root.title)}</div>
+            <div style="font-weight: 700; font-size: 9.5pt; color: #0f172a;">${i + 1}. ${escapeHtml(
+          root.title
+        )}</div>
             ${subItems}
           </div>
         `;
@@ -407,7 +804,9 @@ export function KnowledgePdfExportModal({
           ${escapeHtml(knowledgeMap.title || 'Knowledge Hierarchy Map')}
         </h1>
         <div style="font-size: 8.5pt; color: #64748b;">
-          Generated: ${new Date(knowledgeMap.createdAt).toLocaleDateString()} • ${totalExportNodes} Analyzed Topics • Clinical Synthesis
+          Generated: ${new Date(
+            knowledgeMap.createdAt
+          ).toLocaleDateString()} • ${totalExportNodes} Analyzed Topics • Clinical Synthesis
         </div>
       </div>
       <div style="text-align: right;">
@@ -417,7 +816,9 @@ export function KnowledgePdfExportModal({
   </div>
 
   <!-- Document Summary -->
-  ${includeSummary && knowledgeMap.documentSummary ? `
+  ${
+    includeSummary && knowledgeMap.documentSummary
+      ? `
     <div style="page-break-inside: avoid; break-inside: avoid; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px;">
       <div style="font-size: 9pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 6px;">
         📖 High-Yield Synthesis &amp; Clinical Core Themes
@@ -426,7 +827,9 @@ export function KnowledgePdfExportModal({
         ${simpleMarkdownToHtml(knowledgeMap.documentSummary)}
       </div>
     </div>
-  ` : ''}
+  `
+      : ''
+  }
 
   <!-- Syllabus Index Table of Contents -->
   <div style="page-break-inside: avoid; break-inside: avoid; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 18px; background: #ffffff;">
@@ -465,53 +868,10 @@ export function KnowledgePdfExportModal({
   ]);
 
   /**
-   * Executes printing in an isolated hidden iframe so no modal backdrop,
-   * CSS variables, or dark themes can corrupt the white paper printout.
+   * Browser Print execution.
    */
   const handlePrint = () => {
-    try {
-      let iframe = document.getElementById('print-sandbox-iframe') as HTMLIFrameElement | null;
-      if (!iframe) {
-        iframe = document.createElement('iframe');
-        iframe.id = 'print-sandbox-iframe';
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0';
-        iframe.style.height = '0';
-        iframe.style.border = '0';
-        iframe.style.visibility = 'hidden';
-        document.body.appendChild(iframe);
-      }
-
-      const doc = iframe.contentWindow?.document || iframe.contentDocument;
-      if (doc) {
-        doc.open();
-        doc.write(printableHtml);
-        doc.close();
-
-        // Give the iframe document a moment to parse and render fonts
-        setTimeout(() => {
-          try {
-            iframe?.contentWindow?.focus();
-            iframe?.contentWindow?.print();
-          } catch (err) {
-            console.error('Iframe print failed, falling back to popup window', err);
-            const win = window.open('', '_blank');
-            if (win) {
-              win.document.write(printableHtml);
-              win.document.close();
-              win.focus();
-              setTimeout(() => win.print(), 300);
-            }
-          }
-        }, 250);
-      }
-    } catch (err) {
-      console.error('Printing error:', err);
-      // Fallback: standard print
-      window.print();
-    }
+    window.print();
   };
 
   /**
@@ -535,11 +895,14 @@ export function KnowledgePdfExportModal({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-0 overflow-hidden border border-border shadow-2xl">
-        <DialogHeader className="p-4 sm:p-5 pb-3 border-b bg-card/70">
+        <DialogHeader className="p-4 sm:p-5 pb-3 border-b bg-card/70 print:hidden">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-[10px] font-mono border-amber-500/40 text-amber-600 bg-amber-500/10">
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-mono border-amber-500/40 text-amber-600 bg-amber-500/10"
+                >
                   <Printer className="h-3 w-3 mr-1" /> Printable Study Sheet
                 </Badge>
                 <span className="text-xs font-handwriting text-primary">
@@ -550,7 +913,7 @@ export function KnowledgePdfExportModal({
                 Export Knowledge Map &amp; Study Notes
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
-                Generate high-resolution printable worksheets formatted with custom handwritten ruling lines.
+                Generate high-resolution printable worksheets or download directly as a formatted PDF.
               </DialogDescription>
             </div>
 
@@ -581,7 +944,7 @@ export function KnowledgePdfExportModal({
         </DialogHeader>
 
         {/* Modal Content */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 print:hidden">
           {activeTab === 'settings' ? (
             <>
               {/* Export Scope Selector */}
@@ -627,7 +990,9 @@ export function KnowledgePdfExportModal({
                       {scope === 'selected' && <Check className="h-4 w-4 text-primary" />}
                     </div>
                     <p className="text-[11px] text-muted-foreground truncate">
-                      {activeNode ? `"${activeNode.title}" + children` : 'Click a node in the tree to select'}
+                      {activeNode
+                        ? `"${activeNode.title}" + children`
+                        : 'Click a node in the tree to select'}
                     </p>
                   </button>
                 </div>
@@ -672,7 +1037,10 @@ export function KnowledgePdfExportModal({
                         Include ground-truth mechanism breakdowns
                       </p>
                     </div>
-                    <Switch checked={includeFirstPrinciples} onCheckedChange={setIncludeFirstPrinciples} />
+                    <Switch
+                      checked={includeFirstPrinciples}
+                      onCheckedChange={setIncludeFirstPrinciples}
+                    />
                   </div>
 
                   <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-card/60">
@@ -709,17 +1077,17 @@ export function KnowledgePdfExportModal({
                   <Slider
                     value={[noteLineCount]}
                     min={0}
-                    max={12}
+                    max={8}
                     step={1}
                     onValueChange={(val) => setNoteLineCount(val[0])}
                     className="py-2"
                   />
                   <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-                    <span>0 (No lines)</span>
-                    <span>3 lines (~20mm)</span>
-                    <span>5 lines (Recommended)</span>
+                    <span>0 (Compact)</span>
+                    <span>2 lines</span>
+                    <span>4 lines (Standard)</span>
+                    <span>6 lines</span>
                     <span>8 lines</span>
-                    <span>12 lines (Full section)</span>
                   </div>
                 </div>
 
@@ -749,7 +1117,9 @@ export function KnowledgePdfExportModal({
                 <div className="rounded-xl border border-dashed border-border p-3 bg-muted/20 space-y-2">
                   <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                     <span className="font-semibold">Sample Ruled Note Area Preview:</span>
-                    <span className="font-handwriting text-primary text-xs">✍️ Student Handwriting Area</span>
+                    <span className="font-handwriting text-primary text-xs">
+                      ✍️ Student Handwriting Area
+                    </span>
                   </div>
                   <div className="bg-card p-3 rounded-lg border border-border">
                     {rulingStyle === 'ruled' && (
@@ -757,11 +1127,6 @@ export function KnowledgePdfExportModal({
                         {Array.from({ length: Math.min(noteLineCount, 4) }).map((_, i) => (
                           <div key={i} className="h-0 border-b border-border/80 border-dashed" />
                         ))}
-                        {noteLineCount > 4 && (
-                          <div className="text-[10px] text-center text-muted-foreground font-mono">
-                            + {noteLineCount - 4} more lines on printout...
-                          </div>
-                        )}
                       </div>
                     )}
                     {rulingStyle === 'dotted' && (
@@ -802,8 +1167,15 @@ export function KnowledgePdfExportModal({
           )}
         </div>
 
+        {/* Dedicated Print DOM Container for High-Fidelity Browser Print */}
+        <div
+          id="printable-knowledge-map"
+          className="hidden print:block p-8 bg-white text-slate-900"
+          dangerouslySetInnerHTML={{ __html: printableHtml.replace(/^<!DOCTYPE[\s\S]*?<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '') }}
+        />
+
         {/* Footer Actions */}
-        <DialogFooter className="p-4 sm:p-5 pt-3 border-t bg-card/80 flex items-center justify-between gap-3">
+        <DialogFooter className="p-4 sm:p-5 pt-3 border-t bg-card/80 flex items-center justify-between gap-3 print:hidden">
           <div className="text-xs text-muted-foreground hidden sm:block">
             Ready to export <span className="font-bold text-foreground">{totalExportNodes} topics</span>
           </div>
@@ -822,12 +1194,26 @@ export function KnowledgePdfExportModal({
               <span>HTML File</span>
             </Button>
             <Button
+              variant="outline"
               size="sm"
               onClick={handlePrint}
-              className="text-xs gap-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold shadow-xs"
+              className="text-xs gap-1.5"
             >
-              <Printer className="h-4 w-4" />
-              <span>Print / Save as PDF</span>
+              <Printer className="h-3.5 w-3.5 text-muted-foreground" />
+              <span>Print</span>
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleDownloadDirectPdf}
+              disabled={isGeneratingPdf}
+              className="text-xs gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-xs"
+            >
+              {isGeneratingPdf ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              <span>{isGeneratingPdf ? 'Generating PDF...' : 'Download PDF (.pdf)'}</span>
             </Button>
           </div>
         </DialogFooter>
@@ -858,3 +1244,4 @@ function countNodes(tree: KnowledgeTreeNode[]): number {
   }
   return count;
 }
+

@@ -5,6 +5,7 @@ import { detectProviderIdFromEndpoint } from '@/context/SettingsContext';
 import {
     parseAiJson,
     repairJsonString,
+    extractBalancedJson,
     extractProgressiveDiagnosis,
     extractProgressiveSlides,
     extractProgressiveClinicalAnswer,
@@ -16,6 +17,7 @@ import {
 export {
     parseAiJson,
     repairJsonString,
+    extractBalancedJson,
     extractProgressiveDiagnosis,
     extractProgressiveSlides,
     extractProgressiveClinicalAnswer,
@@ -297,22 +299,25 @@ async function optimizeImageForAiVision(dataUriOrBase64: string, mimeType: strin
 }
 
 /**
- * Normalizes and extracts clean MIME type and pure Base64 data from any media input (audio, image, PDF, blob URLs, or objects).
+ * Normalizes and extracts clean MIME type and pure Base64 data from any media input (audio, image, PDF, blob URLs, objects).
  */
 export async function normalizeMediaForGemini(mediaInput: any): Promise<{ data: string; mimeType: string } | null> {
     if (!mediaInput) return null;
 
+    // Handle object inputs directly
     if (typeof mediaInput === 'object') {
-        if (mediaInput.data && typeof mediaInput.data === 'string') {
-            const rawMime = (mediaInput.mimeType || 'image/jpeg').trim();
-            const sanitizedMime = sanitizeMimeType(rawMime);
-            if (sanitizedMime.startsWith('image/')) {
-                return optimizeImageForAiVision(mediaInput.data, sanitizedMime);
-            }
-            return { data: mediaInput.data, mimeType: sanitizedMime };
+        if (typeof mediaInput.data === 'string' && typeof mediaInput.mimeType === 'string') {
+            const cleanData = mediaInput.data.includes('base64,') ? mediaInput.data.split('base64,')[1] : mediaInput.data;
+            return { data: cleanData, mimeType: sanitizeMimeType(mediaInput.mimeType) };
         }
-        if (mediaInput.url && typeof mediaInput.url === 'string') {
+        if (typeof mediaInput.url === 'string') {
             return normalizeMediaForGemini(mediaInput.url);
+        }
+        if (typeof mediaInput.src === 'string') {
+            return normalizeMediaForGemini(mediaInput.src);
+        }
+        if (Array.isArray(mediaInput.processedImages) && mediaInput.processedImages.length > 0) {
+            return normalizeMediaForGemini(mediaInput.processedImages[0]);
         }
         return null;
     }
@@ -436,16 +441,27 @@ export async function executeAiPrompt(
     const config = resolveAiConfig(configOrKey);
 
     // Normalize images into mimeType & base64 objects
+    const rawImagesList: any[] = [];
+    if (Array.isArray(images)) {
+        rawImagesList.push(...images);
+    } else if (images && typeof images === 'object') {
+        if (Array.isArray((images as any).processedImages)) {
+            rawImagesList.push(...(images as any).processedImages);
+        } else {
+            rawImagesList.push(images);
+        }
+    } else if (typeof images === 'string') {
+        rawImagesList.push(images);
+    }
+
     const normalizedImages: Array<{ data: string; mimeType: string }> = [];
-    if (images && images.length > 0) {
-        for (const img of images) {
-            if (options?.signal?.aborted) {
-                throw new DOMException('The operation was aborted by the user', 'AbortError');
-            }
-            const normalized = await normalizeMediaForGemini(img);
-            if (normalized && normalized.data) {
-                normalizedImages.push(normalized);
-            }
+    for (const img of rawImagesList) {
+        if (options?.signal?.aborted) {
+            throw new DOMException('The operation was aborted by the user', 'AbortError');
+        }
+        const normalized = await normalizeMediaForGemini(img);
+        if (normalized && normalized.data) {
+            normalizedImages.push(normalized);
         }
     }
 
@@ -749,16 +765,27 @@ export async function executeStreamingAiPrompt(
     const config = resolveAiConfig(configOrKey);
 
     // Normalize images
+    const rawImagesList: any[] = [];
+    if (Array.isArray(images)) {
+        rawImagesList.push(...images);
+    } else if (images && typeof images === 'object') {
+        if (Array.isArray((images as any).processedImages)) {
+            rawImagesList.push(...(images as any).processedImages);
+        } else {
+            rawImagesList.push(images);
+        }
+    } else if (typeof images === 'string') {
+        rawImagesList.push(images);
+    }
+
     const normalizedImages: Array<{ data: string; mimeType: string }> = [];
-    if (images && images.length > 0) {
-        for (const img of images) {
-            if (options?.signal?.aborted) {
-                throw new DOMException('The operation was aborted by the user', 'AbortError');
-            }
-            const normalized = await normalizeMediaForGemini(img);
-            if (normalized && normalized.data) {
-                normalizedImages.push(normalized);
-            }
+    for (const img of rawImagesList) {
+        if (options?.signal?.aborted) {
+            throw new DOMException('The operation was aborted by the user', 'AbortError');
+        }
+        const normalized = await normalizeMediaForGemini(img);
+        if (normalized && normalized.data) {
+            normalizedImages.push(normalized);
         }
     }
 
@@ -2167,7 +2194,7 @@ ${JSON.stringify(
         apiKeyOrConfig: string | AiConfig,
         input: {
             text?: string;
-            images?: Array<{ data: string; mimeType: string }>;
+            images?: any;
             language?: TargetLanguage;
             audienceMode?: AudienceMode;
             onStreamChunk?: (payload: StreamChunkCallbackPayload) => void;
@@ -2241,81 +2268,7 @@ Produce ONLY the JSON object.`;
             { signal: input.signal }
         );
 
-        type RawKnowledgeMap = {
-            title?: string;
-            documentSummary?: string;
-            tree?: any[];
-        };
-
-        const parsed = parseAiJson<RawKnowledgeMap>(text, {
-            title: 'Knowledge Study Map',
-            documentSummary: 'Document synthesis completed.',
-            tree: [],
-        });
-
-        // Recursive helper to sanitize and assign unique IDs / depths
-        let idCounter = 1;
-        const sanitizeNode = (raw: any, depth = 0, prefix = 'node'): KnowledgeTreeNode => {
-            const nodeId = raw.id || `${prefix}_${idCounter++}`;
-            const title = typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : `Topic ${idCounter}`;
-            const description = typeof raw.description === 'string' ? raw.description.trim() : '';
-            const pyqTag = typeof raw.pyqTag === 'string' ? raw.pyqTag.trim() : undefined;
-            const firstPrincipleAnchor = typeof raw.firstPrincipleAnchor === 'string' ? raw.firstPrincipleAnchor.trim() : undefined;
-            const keyTakeaway = typeof raw.keyTakeaway === 'string' ? raw.keyTakeaway.trim() : undefined;
-
-            const children: KnowledgeTreeNode[] = [];
-            if (Array.isArray(raw.children)) {
-                for (const child of raw.children) {
-                    if (child && typeof child === 'object') {
-                        children.push(sanitizeNode(child, depth + 1, `${nodeId}_sub`));
-                    }
-                }
-            }
-
-            return {
-                id: nodeId,
-                title,
-                description,
-                depth,
-                pyqTag,
-                firstPrincipleAnchor,
-                keyTakeaway,
-                children: children.length > 0 ? children : undefined,
-                isExpanded: depth < 2, // Auto-expand first 2 levels
-            };
-        };
-
-        const title = parsed.title || 'Knowledge Hierarchy Map';
-        const documentSummary = parsed.documentSummary || 'Comprehensive overview of the provided study materials.';
-        const rawTree = Array.isArray(parsed.tree) ? parsed.tree : [];
-        const sanitizedTree = rawTree.map((n, i) => sanitizeNode(n, 0, `root_${i + 1}`));
-
-        return {
-            title,
-            documentSummary,
-            tree: sanitizedTree.length > 0 ? sanitizedTree : [
-                {
-                    id: 'root_1',
-                    title: title,
-                    description: 'Primary overview of the document concepts.',
-                    depth: 0,
-                    children: [
-                        {
-                            id: 'root_1_sub_1',
-                            title: 'Core Principles & Fundamentals',
-                            description: 'Foundational concepts extracted from the material.',
-                            depth: 1,
-                        },
-                        {
-                            id: 'root_1_sub_2',
-                            title: 'Mechanisms & Methodologies',
-                            description: 'Step-by-step processes and functional workflows.',
-                            depth: 1,
-                        }
-                    ]
-                }
-            ]
-        };
+        return parseKnowledgeMapResponse(text, input.text);
     },
 
     /**
@@ -2388,27 +2341,109 @@ Produce ONLY the JSON array.`;
 
         let parsed = parseAiJson<any[]>(text, []);
         if (!Array.isArray(parsed) || parsed.length === 0) {
-            // Check if returned as an object with { subtopics: [...] }
             const objParsed = parseAiJson<any>(text, {});
-            if (objParsed && Array.isArray(objParsed.subtopics)) {
-                parsed = objParsed.subtopics;
-            } else if (objParsed && Array.isArray(objParsed.children)) {
-                parsed = objParsed.children;
+            if (objParsed && typeof objParsed === 'object') {
+                const candidateArrayKeys = ['subtopics', 'sub_topics', 'children', 'topics', 'nodes', 'items', 'branches', 'concepts'];
+                for (const key of candidateArrayKeys) {
+                    if (Array.isArray(objParsed[key]) && objParsed[key].length > 0) {
+                        parsed = objParsed[key];
+                        break;
+                    }
+                }
             }
         }
 
         const newDepth = input.targetNode.depth + 1;
         const parentId = input.targetNode.id;
 
-        return (parsed || []).map((item, idx) => ({
-            id: `${parentId}_dissect_${idx + 1}_${Date.now().toString(36)}`,
-            title: typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `Subtopic ${idx + 1}`,
-            description: typeof item.description === 'string' ? item.description.trim() : '',
-            depth: newDepth,
-            pyqTag: typeof item.pyqTag === 'string' ? item.pyqTag.trim() : undefined,
-            firstPrincipleAnchor: typeof item.firstPrincipleAnchor === 'string' ? item.firstPrincipleAnchor.trim() : undefined,
-            isExpanded: true,
-        }));
+        if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed.map((item, idx) => {
+                if (typeof item === 'string') {
+                    return {
+                        id: `${parentId}_dissect_${idx + 1}_${Date.now().toString(36)}`,
+                        title: item.trim(),
+                        description: '',
+                        depth: newDepth,
+                        isExpanded: true,
+                    };
+                }
+                const title = typeof item.title === 'string' && item.title.trim()
+                    ? item.title.trim()
+                    : (typeof item.name === 'string' && item.name.trim()
+                        ? item.name.trim()
+                        : (typeof item.topic === 'string' && item.topic.trim()
+                            ? item.topic.trim()
+                            : (typeof item.concept === 'string' && item.concept.trim()
+                                ? item.concept.trim()
+                                : `Subtopic ${idx + 1}`)));
+
+                const description = typeof item.description === 'string'
+                    ? item.description.trim()
+                    : (typeof item.desc === 'string'
+                        ? item.desc.trim()
+                        : (typeof item.summary === 'string'
+                            ? item.summary.trim()
+                            : (typeof item.content === 'string' ? item.content.trim() : '')));
+
+                const pyqTag = typeof item.pyqTag === 'string'
+                    ? item.pyqTag.trim()
+                    : (typeof item.pyq_tag === 'string'
+                        ? item.pyq_tag.trim()
+                        : (typeof item.tag === 'string' ? item.tag.trim() : undefined));
+
+                const firstPrincipleAnchor = typeof item.firstPrincipleAnchor === 'string'
+                    ? item.firstPrincipleAnchor.trim()
+                    : (typeof item.first_principle_anchor === 'string'
+                        ? item.first_principle_anchor.trim()
+                        : (typeof item.firstPrinciple === 'string'
+                            ? item.firstPrinciple.trim()
+                            : (typeof item.anchor === 'string' ? item.anchor.trim() : undefined)));
+
+                return {
+                    id: `${parentId}_dissect_${idx + 1}_${Date.now().toString(36)}`,
+                    title,
+                    description,
+                    depth: newDepth,
+                    pyqTag,
+                    firstPrincipleAnchor,
+                    isExpanded: true,
+                };
+            });
+        }
+
+        // Fallback if AI produced text without JSON
+        const fallbackLines = (text || '')
+            .split('\n')
+            .map(l => l.replace(/^[-*#\d.]+\s*/, '').replace(/\*\*/g, '').trim())
+            .filter(l => l.length > 3 && !l.startsWith('{') && !l.startsWith('}'))
+            .slice(0, 4);
+
+        if (fallbackLines.length > 0) {
+            return fallbackLines.map((line, idx) => ({
+                id: `${parentId}_dissect_${idx + 1}_${Date.now().toString(36)}`,
+                title: line,
+                description: 'Granular sub-concept extracted from analysis.',
+                depth: newDepth,
+                isExpanded: true,
+            }));
+        }
+
+        return [
+            {
+                id: `${parentId}_dissect_1_${Date.now().toString(36)}`,
+                title: `${input.targetNode.title}: Primary Mechanisms`,
+                description: 'Core pathophysiological and biochemical processes.',
+                depth: newDepth,
+                isExpanded: true,
+            },
+            {
+                id: `${parentId}_dissect_2_${Date.now().toString(36)}`,
+                title: `${input.targetNode.title}: Clinical Applications & Rules`,
+                description: 'Diagnostic criteria, classifications, and practical exam takeaways.',
+                depth: newDepth,
+                isExpanded: true,
+            }
+        ];
     },
 
     /**
@@ -2495,5 +2530,438 @@ Produce the complete Markdown explanation directly without meta-commentary.`;
     formatModelDisplayName,
     resolveAiConfig,
 };
+
+/**
+ * Universal robust parser for Knowledge Maps.
+ * Decodes JSON from any LLM schema permutation (wrapped objects, alternative keys, direct arrays),
+ * and can recover structured knowledge trees from Markdown outlines if JSON was omitted.
+ */
+export function parseKnowledgeMapResponse(
+    rawText: string,
+    userPromptOrTopic?: string
+): { title: string; documentSummary: string; tree: KnowledgeTreeNode[] } {
+    if (!rawText || typeof rawText !== 'string') {
+        return createDefaultKnowledgeMap(userPromptOrTopic);
+    }
+
+    const { cleanText } = stripThinkingTags(rawText);
+    const cleaned = cleanText.trim();
+
+    // 1. Try standard JSON parse & repair
+    let parsed = parseAiJson<any>(cleaned, null);
+
+    // If still null, try balanced bracket extraction
+    if (!parsed) {
+        const balanced = extractBalancedJson(cleaned);
+        if (balanced) {
+            try {
+                parsed = JSON.parse(balanced);
+            } catch {
+                try {
+                    parsed = JSON.parse(repairJsonString(balanced));
+                } catch {}
+            }
+        }
+    }
+
+    // 2. Unwrap wrapper objects if nested
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const wrapperKeys = [
+            'knowledgeMap',
+            'knowledge_map',
+            'knowledgeTree',
+            'knowledge_tree',
+            'studyMap',
+            'study_map',
+            'data',
+            'result',
+            'response',
+            'output',
+            'map',
+            'mindmap',
+            'tree',
+            'content',
+        ];
+        for (const key of wrapperKeys) {
+            if (parsed[key] && typeof parsed[key] === 'object') {
+                parsed = parsed[key];
+                break;
+            }
+        }
+    }
+
+    // 3. Extract raw tree, title, and summary
+    let rawTree: any[] = [];
+    let title = '';
+    let documentSummary = '';
+
+    if (Array.isArray(parsed)) {
+        rawTree = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+        title =
+            parsed.title ||
+            parsed.name ||
+            parsed.topic ||
+            parsed.subject ||
+            parsed.documentTitle ||
+            parsed.document_title ||
+            parsed.mapTitle ||
+            parsed.map_title ||
+            parsed.heading ||
+            parsed.mainTopic ||
+            parsed.main_topic ||
+            '';
+
+        documentSummary =
+            parsed.documentSummary ||
+            parsed.document_summary ||
+            parsed.summary ||
+            parsed.docSummary ||
+            parsed.overview ||
+            parsed.synthesis ||
+            parsed.description ||
+            parsed.abstract ||
+            parsed.details ||
+            parsed.introduction ||
+            '';
+
+        const treeCandidateKeys = [
+            'tree',
+            'topics',
+            'nodes',
+            'branches',
+            'hierarchy',
+            'mindmap',
+            'modules',
+            'sections',
+            'subtopics',
+            'sub_topics',
+            'chapters',
+            'outline',
+            'knowledgeTree',
+            'knowledge_tree',
+            'items',
+            'curriculum',
+            'syllabus',
+            'children',
+            'concepts',
+        ];
+
+        for (const key of treeCandidateKeys) {
+            if (Array.isArray(parsed[key]) && parsed[key].length > 0) {
+                rawTree = parsed[key];
+                break;
+            }
+        }
+
+        // If no array found under keys, check if parsed itself is a single root node with children
+        if (rawTree.length === 0 && (parsed.children || parsed.subtopics || parsed.nodes || parsed.branches)) {
+            rawTree = [parsed];
+        }
+    }
+
+    // 4. If JSON parsing yielded 0 tree nodes, attempt Markdown outline parsing
+    if (rawTree.length === 0) {
+        const mdResult = parseMarkdownKnowledgeOutline(cleaned, userPromptOrTopic);
+        if (mdResult.tree.length > 0) {
+            return mdResult;
+        }
+    }
+
+    // 5. Sanitize and structure the nodes recursively
+    let idCounter = 1;
+    const sanitizeNode = (raw: any, depth = 0, prefix = 'node'): KnowledgeTreeNode => {
+        if (typeof raw === 'string') {
+            return {
+                id: `${prefix}_${idCounter++}`,
+                title: raw.trim(),
+                description: '',
+                depth,
+                isExpanded: depth < 2,
+            };
+        }
+
+        const nodeId = raw.id || raw.key || raw.nodeId || `${prefix}_${idCounter++}`;
+        const nodeTitle =
+            typeof raw.title === 'string' && raw.title.trim()
+                ? raw.title.trim()
+                : typeof raw.name === 'string' && raw.name.trim()
+                ? raw.name.trim()
+                : typeof raw.topic === 'string' && raw.topic.trim()
+                ? raw.topic.trim()
+                : typeof raw.label === 'string' && raw.label.trim()
+                ? raw.label.trim()
+                : typeof raw.heading === 'string' && raw.heading.trim()
+                ? raw.heading.trim()
+                : typeof raw.concept === 'string' && raw.concept.trim()
+                ? raw.concept.trim()
+                : `Topic ${idCounter}`;
+
+        const description =
+            typeof raw.description === 'string'
+                ? raw.description.trim()
+                : typeof raw.desc === 'string'
+                ? raw.desc.trim()
+                : typeof raw.summary === 'string'
+                ? raw.summary.trim()
+                : typeof raw.detail === 'string'
+                ? raw.detail.trim()
+                : typeof raw.content === 'string'
+                ? raw.content.trim()
+                : typeof raw.explanation === 'string'
+                ? raw.explanation.trim()
+                : typeof raw.overview === 'string'
+                ? raw.overview.trim()
+                : '';
+
+        const pyqTag =
+            typeof raw.pyqTag === 'string'
+                ? raw.pyqTag.trim()
+                : typeof raw.pyq_tag === 'string'
+                ? raw.pyq_tag.trim()
+                : typeof raw.tag === 'string'
+                ? raw.tag.trim()
+                : typeof raw.examTag === 'string'
+                ? raw.examTag.trim()
+                : typeof raw.badge === 'string'
+                ? raw.badge.trim()
+                : undefined;
+
+        const firstPrincipleAnchor =
+            typeof raw.firstPrincipleAnchor === 'string'
+                ? raw.firstPrincipleAnchor.trim()
+                : typeof raw.first_principle_anchor === 'string'
+                ? raw.first_principle_anchor.trim()
+                : typeof raw.firstPrinciple === 'string'
+                ? raw.firstPrinciple.trim()
+                : typeof raw.anchor === 'string'
+                ? raw.anchor.trim()
+                : typeof raw.mechanism === 'string'
+                ? raw.mechanism.trim()
+                : typeof raw.principle === 'string'
+                ? raw.principle.trim()
+                : undefined;
+
+        const keyTakeaway =
+            typeof raw.keyTakeaway === 'string'
+                ? raw.keyTakeaway.trim()
+                : typeof raw.key_takeaway === 'string'
+                ? raw.key_takeaway.trim()
+                : typeof raw.takeaway === 'string'
+                ? raw.takeaway.trim()
+                : undefined;
+
+        const rawChildren =
+            raw.children ||
+            raw.subtopics ||
+            raw.subNodes ||
+            raw.sub_topics ||
+            raw.sub_nodes ||
+            raw.nodes ||
+            raw.items ||
+            raw.branches ||
+            raw.topics ||
+            raw.childTopics ||
+            raw.child_topics ||
+            raw.sub_concepts ||
+            raw.subConcepts;
+
+        const children: KnowledgeTreeNode[] = [];
+        if (Array.isArray(rawChildren)) {
+            for (const child of rawChildren) {
+                if (child && (typeof child === 'object' || typeof child === 'string')) {
+                    children.push(sanitizeNode(child, depth + 1, `${nodeId}_sub`));
+                }
+            }
+        }
+
+        return {
+            id: nodeId,
+            title: nodeTitle,
+            description,
+            depth,
+            pyqTag,
+            firstPrincipleAnchor,
+            keyTakeaway,
+            children: children.length > 0 ? children : undefined,
+            isExpanded: depth < 2,
+        };
+    };
+
+    const sanitizedTree = rawTree.map((n, i) => sanitizeNode(n, 0, `root_${i + 1}`));
+
+    const cleanTitle =
+        title.trim() ||
+        (sanitizedTree[0]?.title && sanitizedTree[0].title.length < 50 ? sanitizedTree[0].title : '') ||
+        userPromptOrTopic?.slice(0, 50)?.trim() ||
+        'Knowledge Study Map';
+
+    const cleanSummary =
+        documentSummary.trim() ||
+        'Comprehensive synthesis of the core topics, mechanisms, and key study themes.';
+
+    if (sanitizedTree.length > 0) {
+        return {
+            title: cleanTitle,
+            documentSummary: cleanSummary,
+            tree: sanitizedTree,
+        };
+    }
+
+    return createDefaultKnowledgeMap(userPromptOrTopic, cleanTitle);
+}
+
+/**
+ * Parses Markdown outlines (# Heading, ## Subheading, ### Subtopic, - Bullet) into structured KnowledgeTreeNodes.
+ */
+export function parseMarkdownKnowledgeOutline(
+    mdText: string,
+    fallbackTitle?: string
+): { title: string; documentSummary: string; tree: KnowledgeTreeNode[] } {
+    const lines = mdText.split('\n').map((l) => l.trim()).filter(Boolean);
+    let title = fallbackTitle || '';
+    let summary = '';
+    const roots: KnowledgeTreeNode[] = [];
+    let currentL1: KnowledgeTreeNode | null = null;
+    let currentL2: KnowledgeTreeNode | null = null;
+    let idCounter = 1;
+
+    for (const line of lines) {
+        // Document Title
+        if (!title && line.startsWith('# ') && !line.startsWith('## ')) {
+            title = line.replace(/^#\s+/, '').replace(/\*\*/g, '').trim();
+            continue;
+        }
+
+        // Summary lines
+        if (
+            !currentL1 &&
+            (line.toLowerCase().startsWith('**summary') ||
+                line.toLowerCase().startsWith('summary:') ||
+                line.toLowerCase().startsWith('overview:'))
+        ) {
+            summary = line.replace(/^(\*\*summary\*\*|\*\*overview\*\*|summary:|overview:)\s*/i, '').trim();
+            continue;
+        }
+
+        const isH2 = line.startsWith('## ') && !line.startsWith('### ');
+        const isNum1 = /^\d+\.\s+[A-Za-z]/.test(line);
+
+        if (isH2 || isNum1) {
+            const cleanName = line.replace(/^##\s+/, '').replace(/^\d+\.\s+/, '').replace(/\*\*/g, '').trim();
+            currentL1 = {
+                id: `node_root_${idCounter++}`,
+                title: cleanName,
+                description: '',
+                depth: 0,
+                children: [],
+                isExpanded: true,
+            };
+            roots.push(currentL1);
+            currentL2 = null;
+            continue;
+        }
+
+        const isH3 = line.startsWith('### ');
+        const isNum2 = /^\d+\.\d+\s+[A-Za-z]/.test(line);
+        const isBullet = line.startsWith('- ') || line.startsWith('* ');
+
+        if (currentL1 && (isH3 || isNum2)) {
+            const cleanName = line.replace(/^###\s+/, '').replace(/^\d+\.\d+\s+/, '').replace(/\*\*/g, '').trim();
+            currentL2 = {
+                id: `${currentL1.id}_sub_${idCounter++}`,
+                title: cleanName,
+                description: '',
+                depth: 1,
+                children: [],
+                isExpanded: true,
+            };
+            if (!currentL1.children) currentL1.children = [];
+            currentL1.children.push(currentL2);
+            continue;
+        }
+
+        if (currentL2 && isBullet) {
+            const cleanText = line.replace(/^[-*]\s+/, '').replace(/\*\*/g, '').trim();
+            if (cleanText.toLowerCase().includes('first principle') || cleanText.toLowerCase().includes('anchor:')) {
+                currentL2.firstPrincipleAnchor = cleanText.replace(/^(first principle|anchor):\s*/i, '');
+            } else if (cleanText.toLowerCase().includes('pyq') || cleanText.toLowerCase().includes('tag:')) {
+                currentL2.pyqTag = cleanText.replace(/^(pyq|tag):\s*/i, '');
+            } else if (!currentL2.description) {
+                currentL2.description = cleanText;
+            } else {
+                const l3Node: KnowledgeTreeNode = {
+                    id: `${currentL2.id}_sub_${idCounter++}`,
+                    title: cleanText,
+                    description: '',
+                    depth: 2,
+                    isExpanded: false,
+                };
+                if (!currentL2.children) currentL2.children = [];
+                currentL2.children.push(l3Node);
+            }
+            continue;
+        }
+
+        if (currentL1 && isBullet && !currentL2) {
+            const cleanText = line.replace(/^[-*]\s+/, '').replace(/\*\*/g, '').trim();
+            if (!currentL1.description) {
+                currentL1.description = cleanText;
+            } else {
+                const subNode: KnowledgeTreeNode = {
+                    id: `${currentL1.id}_sub_${idCounter++}`,
+                    title: cleanText,
+                    description: '',
+                    depth: 1,
+                    children: [],
+                    isExpanded: true,
+                };
+                if (!currentL1.children) currentL1.children = [];
+                currentL1.children.push(subNode);
+            }
+        }
+    }
+
+    return {
+        title: title || fallbackTitle || 'Knowledge Hierarchy Map',
+        documentSummary: summary || 'Comprehensive synthesis of the core topics, mechanisms, and key study themes.',
+        tree: roots,
+    };
+}
+
+function createDefaultKnowledgeMap(userPromptOrTopic?: string, titleOverride?: string) {
+    const rawSubject = titleOverride || (userPromptOrTopic ? userPromptOrTopic.slice(0, 50).trim() : 'Knowledge Study Map');
+    const safeTitle = rawSubject.replace(/[#*`]/g, '').trim() || 'Knowledge Study Map';
+
+    return {
+        title: safeTitle,
+        documentSummary: `Comprehensive knowledge breakdown and first-principles framework for ${safeTitle}.`,
+        tree: [
+            {
+                id: 'root_1',
+                title: safeTitle,
+                description: `Primary conceptual domain and foundations of ${safeTitle}.`,
+                depth: 0,
+                children: [
+                    {
+                        id: 'root_1_sub_1',
+                        title: 'Foundational Principles & Mechanics',
+                        description: 'Core physical, biological, or mathematical rules governing this domain.',
+                        depth: 1,
+                        firstPrincipleAnchor: 'Fundamental laws and foundational invariants.',
+                        pyqTag: 'Core Concept',
+                    },
+                    {
+                        id: 'root_1_sub_2',
+                        title: 'Processes, Pathways & Methodologies',
+                        description: 'Step-by-step causal mechanisms and analytical workflows.',
+                        depth: 1,
+                        pyqTag: 'High-Yield PYQ',
+                    },
+                ],
+            },
+        ],
+    };
+}
 
 export default ClientSideAiService;

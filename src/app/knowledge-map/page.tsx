@@ -242,39 +242,21 @@ function KnowledgeMapContent() {
 
     try {
       // 1. Prepare images if any
-      let rawImages = uploadedFiles;
+      let processedImages = uploadedFiles;
       if (uploadedFiles.length > 0 && compressImages) {
-        rawImages = await compressImagesForAi(uploadedFiles);
+        processedImages = await compressImagesForAi(uploadedFiles);
       }
-      const { processedImages: imagesForAi, summaryText: prepSummary } = await prepareImagesForAiPrompt(rawImages, {
-        compressEnabled: compressImages,
-        targetKb: 50,
-      });
+      const { processedImages: imagesForAi, summaryText: prepSummary } = await prepareImagesForAiPrompt(processedImages);
 
-      // 2. Prepare user prompt context
-      const userText = topicInput.trim();
-      const hasImages = imagesForAi.length > 0;
-      
-      const parts: string[] = [];
-      if (userText) {
-        parts.push(`Topic / Questions / Instructions:\n${userText}`);
-      } else if (hasImages) {
-        parts.push(`[Analyze and deconstruct all clinical topics, lab parameters, notes, diagrams, and medical concepts directly from the attached visual document pages into the knowledge map.]`);
-      }
-      
-      if (prepSummary) {
-        parts.push(`[Attachment Information: ${prepSummary}]`);
-      }
-      
-      if (audioTranscripts.length > 0) {
-        parts.push(`Voice Notes / Dictation:\n${audioTranscripts.join('\n')}`);
-      }
-      
-      if (learningGoal && learningGoal !== 'comprehensive') {
-        parts.push(`Learning Focus Goal: ${learningGoal}`);
-      }
-
-      const fullText = parts.join('\n\n');
+      // 2. Prepare audio transcript context
+      const fullText = [
+        topicInput.trim(),
+        prepSummary ? `[Attached Document/Visual Pages: ${prepSummary}]` : '',
+        audioTranscripts.length > 0 ? `Voice Memo Notes: ${audioTranscripts.join('\n')}` : '',
+        `Learning Focus Goal: ${learningGoal}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
 
       // 3. Call AI Service
       const mapResult = await ClientSideAiService.generateKnowledgeMap(

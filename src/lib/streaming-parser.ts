@@ -180,6 +180,64 @@ export function repairJsonString(jsonStr: string): string {
 }
 
 /**
+ * Extracts the first balanced JSON block (object {...} or array [...]) from raw text,
+ * correctly ignoring nested brackets inside string literals and escaped quotes.
+ */
+export function extractBalancedJson(text: string): string | null {
+  if (!text || typeof text !== 'string') return null;
+
+  const firstBrace = text.indexOf('{');
+  const firstBracket = text.indexOf('[');
+  let startIdx = -1;
+
+  if (firstBrace !== -1 && firstBracket !== -1) {
+    startIdx = Math.min(firstBrace, firstBracket);
+  } else if (firstBrace !== -1) {
+    startIdx = firstBrace;
+  } else if (firstBracket !== -1) {
+    startIdx = firstBracket;
+  }
+
+  if (startIdx === -1) return null;
+
+  let inString = false;
+  let isEscaped = false;
+  const stack: string[] = [];
+
+  for (let i = startIdx; i < text.length; i++) {
+    const char = text[i];
+
+    if (char === '\\' && inString) {
+      isEscaped = !isEscaped;
+      continue;
+    }
+
+    if (char === '"' && !isEscaped) {
+      inString = !inString;
+      continue;
+    }
+
+    isEscaped = false;
+
+    if (!inString) {
+      if (char === '{') stack.push('}');
+      else if (char === '[') stack.push(']');
+      else if (char === '}' || char === ']') {
+        if (stack.length > 0 && stack[stack.length - 1] === char) {
+          stack.pop();
+          if (stack.length === 0) {
+            return text.substring(startIdx, i + 1);
+          }
+        }
+      }
+    }
+  }
+
+  // If unclosed, return substring from startIdx so repairJsonString can seal it
+  return text.substring(startIdx);
+}
+
+/**
  * Universal robust JSON parser that handles codeblocks, bracket extraction,
  * trailing commas, escaped characters, and structural un-nesting.
  */
@@ -220,7 +278,22 @@ export function parseAiJson<T>(rawText: string, fallback: T): T {
     }
   }
 
-  // 3. If fallback is an array (e.g. Slide[]), prioritize finding array `[`
+  // 3. Balanced JSON block extraction
+  const balancedBlock = extractBalancedJson(cleaned);
+  if (balancedBlock) {
+    try {
+      const parsed = JSON.parse(balancedBlock);
+      return unwrapExpected(parsed, fallback);
+    } catch {
+      try {
+        const repaired = repairJsonString(balancedBlock);
+        const parsed = JSON.parse(repaired);
+        return unwrapExpected(parsed, fallback);
+      } catch {}
+    }
+  }
+
+  // 4. If fallback is an array (e.g. Slide[]), prioritize finding array `[`
   if (Array.isArray(fallback)) {
     const firstBracket = cleaned.indexOf('[');
     if (firstBracket !== -1) {
@@ -231,28 +304,6 @@ export function parseAiJson<T>(rawText: string, fallback: T): T {
         return unwrapExpected(parsed, fallback);
       } catch {}
     }
-  }
-
-  // 4. Extract bracket contents [ ... ] or { ... }
-  const firstBrace = cleaned.indexOf('{');
-  const firstBracket = cleaned.indexOf('[');
-  let startIdx = -1;
-
-  if (firstBrace !== -1 && firstBracket !== -1) {
-    startIdx = Math.min(firstBrace, firstBracket);
-  } else if (firstBrace !== -1) {
-    startIdx = firstBrace;
-  } else if (firstBracket !== -1) {
-    startIdx = firstBracket;
-  }
-
-  if (startIdx !== -1) {
-    const targetSubstring = cleaned.substring(startIdx);
-    try {
-      const repaired = repairJsonString(targetSubstring);
-      const parsed = JSON.parse(repaired);
-      return unwrapExpected(parsed, fallback);
-    } catch {}
   }
 
   // 5. Try repairing the entire raw text as last resort
@@ -287,6 +338,9 @@ function unwrapExpected<T>(parsed: any, fallback: T): T {
       if (Array.isArray(parsed.data)) return parsed.data as unknown as T;
       if (Array.isArray(parsed.result)) return parsed.result as unknown as T;
       if (Array.isArray(parsed.response)) return parsed.response as unknown as T;
+      if (Array.isArray(parsed.tree)) return parsed.tree as unknown as T;
+      if (Array.isArray(parsed.nodes)) return parsed.nodes as unknown as T;
+      if (Array.isArray(parsed.subtopics)) return parsed.subtopics as unknown as T;
 
       // Single slide or diagnosis object returned when array was expected
       if (
@@ -297,6 +351,29 @@ function unwrapExpected<T>(parsed: any, fallback: T): T {
         parsed.originalIndex !== undefined
       ) {
         return [parsed] as unknown as T;
+      }
+    }
+  } else if (typeof fallback === 'object' && !Array.isArray(fallback)) {
+    // If caller expects an object but parsed is wrapped inside { data: ... } or { knowledgeMap: ... }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const wrapperKeys = [
+        'knowledgeMap',
+        'knowledge_map',
+        'studyMap',
+        'study_map',
+        'data',
+        'result',
+        'response',
+        'output',
+        'map',
+        'mindmap',
+        'reportKnowledge',
+        'report_knowledge',
+      ];
+      for (const key of wrapperKeys) {
+        if (parsed[key] && typeof parsed[key] === 'object' && !Array.isArray(parsed[key])) {
+          return parsed[key] as T;
+        }
       }
     }
   }
