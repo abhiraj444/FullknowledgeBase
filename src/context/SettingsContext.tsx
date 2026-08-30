@@ -313,9 +313,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (legacyGemini && !loadedProviderKeys['gemini']) {
             loadedProviderKeys['gemini'] = legacyGemini;
         }
-        if (!loadedProviderKeys['gemini'] && process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
-            loadedProviderKeys['gemini'] = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-        }
 
         // 2. Load STT vault from localStorage
         let loadedSttKeys: Record<string, string> = {};
@@ -781,11 +778,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         return INITIAL_SAVED_MODELS[providerId] || [];
     };
 
-    // Derived values
+    // Derived values - strictly require user-entered key in the app UI
+    const isLocalOllama = customEndpoint.includes('localhost') || customEndpoint.includes('127.0.0.1') || customEndpoint.includes(':11434');
     const isConfigured =
         aiProvider === 'gemini'
-            ? (!!geminiApiKey || hasServerKey)
-            : !!customEndpoint.trim() && !!customModel.trim();
+            ? Boolean(geminiApiKey && geminiApiKey.trim().length > 0)
+            : Boolean(
+                customEndpoint.trim().length > 0 &&
+                customModel.trim().length > 0 &&
+                (isLocalOllama || (customApiKey && customApiKey.trim().length > 0))
+              );
 
     const activeModel =
         aiProvider === 'gemini'
@@ -801,7 +803,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
     const aiConfig: AiConfig = useMemo(() => ({
         provider: aiProvider,
-        apiKey: geminiApiKey,
+        apiKey: aiProvider === 'custom' ? (customApiKey || geminiApiKey) : (geminiApiKey || customApiKey),
         geminiApiKey,
         geminiModel: geminiModel || DEFAULT_GEMINI_MODEL,
         customEndpoint,

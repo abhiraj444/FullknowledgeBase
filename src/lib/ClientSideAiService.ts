@@ -58,13 +58,85 @@ export function formatModelDisplayName(modelName?: string): string {
 }
 
 /**
- * Resolves full AI configuration either from an AiConfig object, a raw API key string,
- * or persistent localStorage preferences.
+ * Normalizes custom and third-party LLM endpoints to correct URL paths.
+ * Prevents 404/bad endpoint issues across Groq, OpenRouter, OpenAI, Anthropic, DeepSeek, Cerebras, Ollama, etc.
+ */
+export function normalizeCustomEndpoint(endpoint: string): string {
+    let ep = (endpoint || '').trim().replace(/\/+$/, '');
+    if (!ep) return '';
+
+    const lower = ep.toLowerCase();
+
+    // Groq
+    if (lower.includes('api.groq.com')) {
+        if (!lower.includes('/openai/v1')) {
+            ep = 'https://api.groq.com/openai/v1';
+        }
+    }
+    // OpenRouter
+    else if (lower.includes('openrouter.ai')) {
+        if (!lower.includes('/api/v1')) {
+            ep = 'https://openrouter.ai/api/v1';
+        }
+    }
+    // OpenAI
+    else if (lower.includes('api.openai.com')) {
+        if (!lower.includes('/v1')) {
+            ep = 'https://api.openai.com/v1';
+        }
+    }
+    // Cerebras
+    else if (lower.includes('api.cerebras.ai')) {
+        if (!lower.includes('/v1')) {
+            ep = 'https://api.cerebras.ai/v1';
+        }
+    }
+    // DeepSeek
+    else if (lower.includes('api.deepseek.com')) {
+        if (!lower.includes('/v1')) {
+            ep = 'https://api.deepseek.com/v1';
+        }
+    }
+    // Together AI
+    else if (lower.includes('api.together.xyz')) {
+        if (!lower.includes('/v1')) {
+            ep = 'https://api.together.xyz/v1';
+        }
+    }
+    // Ollama localhost
+    else if (lower.includes('localhost:11434') || lower.includes('127.0.0.1:11434')) {
+        if (!lower.includes('/v1')) {
+            ep = ep.replace(/\/+$/, '') + '/v1';
+        }
+    }
+
+    // Anthropic direct API (uses /v1/messages instead of /chat/completions)
+    if (lower.includes('api.anthropic.com')) {
+        if (ep.endsWith('/chat/completions')) {
+            ep = ep.replace(/\/chat\/completions$/, '');
+        }
+        if (!ep.endsWith('/messages')) {
+            if (!ep.endsWith('/v1')) ep += '/v1';
+            ep += '/messages';
+        }
+        return ep;
+    }
+
+    if (!ep.endsWith('/chat/completions')) {
+        ep = ep.replace(/\/+$/, '') + '/chat/completions';
+    }
+    return ep;
+}
+
+/**
+ * Resolves full AI configuration strictly from the user's provided AiConfig object,
+ * explicit API key string, or persistent localStorage preferences.
+ * Environment variables are never used so user-provided keys are strictly respected.
  */
 export function resolveAiConfig(configOrKey?: string | AiConfig): AiConfig {
     if (!configOrKey || typeof configOrKey === 'string') {
         const storedProvider = (typeof window !== 'undefined' ? localStorage.getItem('app_ai_provider') : null) as 'gemini' | 'custom' | null;
-        const storedGeminiKey = (typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : '') || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+        const storedGeminiKey = (typeof window !== 'undefined' ? (localStorage.getItem('gemini_api_key') || localStorage.getItem('app_provider_key_gemini')) : '') || '';
         const storedGeminiModel = (typeof window !== 'undefined' ? localStorage.getItem('app_gemini_model') : null) || DEFAULT_GEMINI_MODEL;
 
         const storedCustomEndpoint = (typeof window !== 'undefined' ? localStorage.getItem('app_custom_endpoint') : '') || '';
@@ -101,7 +173,9 @@ export function resolveAiConfig(configOrKey?: string | AiConfig): AiConfig {
             model: storedSttModel,
         };
 
-        const explicitKey = typeof configOrKey === 'string' ? configOrKey : '';
+        const explicitKey = (typeof configOrKey === 'string' && configOrKey.trim().length > 0 && !configOrKey.includes('\n') && !configOrKey.includes(' '))
+            ? configOrKey.trim()
+            : '';
 
         if (storedProvider === 'custom' && storedCustomEndpoint) {
             return {
@@ -111,6 +185,7 @@ export function resolveAiConfig(configOrKey?: string | AiConfig): AiConfig {
                 customModel: storedCustomModel || 'gpt-4o',
                 geminiApiKey: explicitKey || storedGeminiKey,
                 geminiModel: storedGeminiModel,
+                apiKey: explicitKey || storedCustomKey || storedGeminiKey,
                 enableReasoning: storedEnableReasoning,
                 thinkingBudget: storedEnableReasoning ? 2048 : 0,
                 sttConfig,
@@ -402,21 +477,24 @@ export async function executeAiPrompt(
 
     // Direct fallback for custom endpoints
     if (config.provider === 'custom') {
-        let endpoint = config.customEndpoint?.trim();
+        let endpoint = normalizeCustomEndpoint(config.customEndpoint || '');
         if (!endpoint) {
             throw new Error('Custom LLM endpoint is not configured. Please set your endpoint URL in Settings.');
         }
 
-        if (!endpoint.endsWith('/chat/completions')) {
-            endpoint = endpoint.replace(/\/+$/, '') + '/chat/completions';
-        }
-
+        const isAnthropic = endpoint.includes('api.anthropic.com');
+        const key = config.customApiKey || config.apiKey;
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
         };
-        const key = config.customApiKey || config.apiKey;
         if (key) {
-            headers['Authorization'] = `Bearer ${key}`;
+            if (isAnthropic) {
+                headers['x-api-key'] = key;
+                headers['anthropic-version'] = '2023-06-01';
+                headers['anthropic-dangerous-direct-browser-access'] = 'true';
+            } else {
+                headers['Authorization'] = `Bearer ${key}`;
+            }
         }
 
         // Detect Groq endpoint for special audio handling and vision models
@@ -484,16 +562,27 @@ export async function executeAiPrompt(
             }
         }
 
-        const payload = {
-            model: initialModel,
-            messages: [
-                {
-                    role: 'user',
-                    content: contentParts.length === 1 ? augmentedPrompt : contentParts,
-                },
-            ],
-            temperature: 0.2,
-        };
+        const payload: any = isAnthropic
+            ? {
+                model: initialModel,
+                max_tokens: 4096,
+                messages: [
+                    {
+                        role: 'user',
+                        content: augmentedPrompt,
+                    },
+                ],
+            }
+            : {
+                model: initialModel,
+                messages: [
+                    {
+                        role: 'user',
+                        content: contentParts.length === 1 ? augmentedPrompt : contentParts,
+                    },
+                ],
+                temperature: 0.2,
+            };
 
         const res = await fetch(endpoint, {
             method: 'POST',
@@ -553,6 +642,9 @@ export async function executeAiPrompt(
         }
 
         const data = await res.json();
+        if (isAnthropic && data.content && Array.isArray(data.content)) {
+            return data.content.map((c: any) => c.text || '').join('');
+        }
         return data.choices?.[0]?.message?.content || '';
     }
 
@@ -560,12 +652,11 @@ export async function executeAiPrompt(
     const apiKey =
         config.geminiApiKey ||
         config.apiKey ||
-        (typeof window !== 'undefined' ? localStorage.getItem('gemini_api_key') : '') ||
-        process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
+        (typeof window !== 'undefined' ? (localStorage.getItem('gemini_api_key') || localStorage.getItem('app_provider_key_gemini')) : '') ||
         '';
 
     if (!apiKey) {
-        throw new Error('Google Gemini API Key is missing. Please add your key in Settings (or configure GEMINI_API_KEY in your Vercel project settings).');
+        throw new Error('Google Gemini API Key is missing. Please add your key in Settings.');
     }
 
     const requestedModel = config.geminiModel || DEFAULT_GEMINI_MODEL;
@@ -2059,23 +2150,18 @@ ${JSON.stringify(
         apiKeyOrConfig: string | AiConfig,
         input: {
             text?: string;
-            images?: string[] | Array<{ data: string; mimeType: string }>;
+            images?: Array<{ data: string; mimeType: string }>;
             language?: TargetLanguage;
             audienceMode?: AudienceMode;
-            reasoningEffort?: string;
             onStreamChunk?: (payload: StreamChunkCallbackPayload) => void;
             signal?: AbortSignal;
         }
     ): Promise<{ title: string; documentSummary: string; tree: KnowledgeTreeNode[] }> {
-        const language = input.language || 'english';
+        const language = input.language || 'en';
         const audienceMode = input.audienceMode || 'doctor';
 
         const prompt = `You are a master academic educator, subject matter expert, and first-principles knowledge architect.
 Analyze the provided document pages, notes, previous year questions (PYQ), or study topic.
-
-${getLanguageDirective(language)}
-
-${getAudienceDirective(audienceMode)}
 
 **Core Objectives:**
 1. Generate an overarching "title" for this subject or uploaded document.
@@ -2089,6 +2175,10 @@ ${getAudienceDirective(audienceMode)}
 
 **User Material / Input:**
 ${input.text ? input.text : '[Visual document/image pages attached. Extract and organize all topics directly from the attachments.]'}
+
+**Audience & Language:**
+- Target Language: ${language.toUpperCase()}
+- Mode: ${audienceMode === 'simplified' ? 'Simplified & Intuitive (Use accessible analogies and clear cause-and-effect)' : 'Professional & Academic (Rigorous, high-yield, structured)'}
 
 **Strict Output JSON Format:**
 Return ONLY valid JSON matching this schema:
@@ -2126,22 +2216,10 @@ Return ONLY valid JSON matching this schema:
 
 Produce ONLY the JSON object.`;
 
-        // Normalize images into array of strings (data URLs or base64) for _runPrompt
-        const imageStrings: string[] = [];
-        if (input.images && Array.isArray(input.images)) {
-            for (const img of input.images) {
-                if (typeof img === 'string') {
-                    imageStrings.push(img);
-                } else if (img && typeof img === 'object' && 'data' in img && 'mimeType' in img) {
-                    imageStrings.push(`data:${img.mimeType};base64,${img.data}`);
-                }
-            }
-        }
-
         const text = await this._runPrompt(
             apiKeyOrConfig,
             prompt,
-            imageStrings.length > 0 ? imageStrings : undefined,
+            input.images,
             input.onStreamChunk,
             { signal: input.signal }
         );
@@ -2238,20 +2316,15 @@ Produce ONLY the JSON object.`;
             siblingTitles?: string[];
             language?: TargetLanguage;
             audienceMode?: AudienceMode;
-            reasoningEffort?: string;
             onStreamChunk?: (payload: StreamChunkCallbackPayload) => void;
             signal?: AbortSignal;
         }
     ): Promise<KnowledgeTreeNode[]> {
-        const language = input.language || 'english';
+        const language = input.language || 'en';
         const audienceMode = input.audienceMode || 'doctor';
 
         const prompt = `You are a master academic educator and first-principles knowledge architect.
 Dissect the specified topic into 3 to 6 granular, logical, and non-overlapping subtopics.
-
-${getLanguageDirective(language)}
-
-${getAudienceDirective(audienceMode)}
 
 **Surgical Context:**
 - Document Overview: ${input.documentSummary.slice(0, 800)}
@@ -2271,6 +2344,9 @@ For each subtopic, provide:
 2. "description": 1-2 sentence orientation explaining this sub-concept clearly.
 3. "firstPrincipleAnchor": 1 sentence ground-truth law or reason *why* this works.
 4. "pyqTag": Optional exam tag (e.g. "High Yield", "Frequently Tested", "Core Mechanism").
+
+**Target Language:** ${language.toUpperCase()}
+**Target Mode:** ${audienceMode === 'simplified' ? 'Simplified / Intuitive' : 'Academic / In-Depth'}
 
 **Strict Output JSON Format:**
 Return ONLY a JSON array of objects:
@@ -2334,13 +2410,11 @@ Produce ONLY the JSON array.`;
             mode: 'standard' | 'first_principles' | 'simplified';
             language?: TargetLanguage;
             audienceMode?: AudienceMode;
-            reasoningEffort?: string;
             onStreamChunk?: (payload: StreamChunkCallbackPayload) => void;
             signal?: AbortSignal;
         }
     ): Promise<string> {
-        const language = input.language || 'english';
-        const audienceMode = input.audienceMode || 'doctor';
+        const language = input.language || 'en';
 
         let modeInstructions = '';
         if (input.mode === 'first_principles') {
@@ -2369,10 +2443,6 @@ Produce ONLY the JSON array.`;
         const prompt = `You are a master academic educator and first-principles professor.
 Explain the following concept with extreme clarity and educational rigor.
 
-${getLanguageDirective(language)}
-
-${getAudienceDirective(audienceMode)}
-
 **Surgical Context:**
 - Document Synthesis: ${input.documentSummary.slice(0, 800)}
 ${input.rootTitle ? `- Domain / Main Subject: ${input.rootTitle}` : ''}
@@ -2389,6 +2459,7 @@ ${modeInstructions}
 **Formatting Guidelines:**
 - Format in rich, clean GitHub-flavored Markdown.
 - Use bolding, clear sub-headings (###), bullet points, callout blockquotes (>), and comparison tables.
+- Write in ${language.toUpperCase()}.
 
 Produce the complete Markdown explanation directly without meta-commentary.`;
 

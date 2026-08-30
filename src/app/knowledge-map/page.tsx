@@ -258,16 +258,18 @@ function KnowledgeMapContent() {
 
       // 3. Call AI Service
       const mapResult = await ClientSideAiService.generateKnowledgeMap(
-        fullText,
-        inlineImages,
         aiConfig,
-        (text) => setStreamText(text),
-        (thinking) => setStreamThinking(thinking),
-        abortControllerRef.current.signal,
         {
+          text: fullText,
+          images: inlineImages,
           language,
           audienceMode,
-          reasoningEffort: modelReasoningEffort,
+          onStreamChunk: (chunk) => {
+            if (chunk.thinking) setStreamThinking(chunk.thinking);
+            if (chunk.text) setStreamText(chunk.text);
+            if (chunk.modelUsed) setStreamModelName(formatModelDisplayName(chunk.modelUsed));
+          },
+          signal: abortControllerRef.current.signal,
         }
       );
 
@@ -333,18 +335,19 @@ function KnowledgeMapContent() {
       const siblings = getNodeSiblingTitles(knowledgeMap.tree, node.id);
 
       const subNodes = await ClientSideAiService.dissectAndExpandKnowledgeNode(
-        knowledgeMap.documentSummary,
-        node,
-        lineage,
-        siblings,
         aiConfig,
-        (text) => setStreamText(text),
-        (thinking) => setStreamThinking(thinking),
-        undefined,
         {
+          documentSummary: knowledgeMap.documentSummary,
+          targetNode: { id: node.id, title: node.title, description: node.description, depth: node.depth },
+          parentTitle: lineage[lineage.length - 2],
+          rootTitle: lineage[0],
+          siblingTitles: siblings,
           language,
           audienceMode,
-          reasoningEffort: modelReasoningEffort,
+          onStreamChunk: (chunk) => {
+            if (chunk.thinking) setStreamThinking(chunk.thinking);
+            if (chunk.text) setStreamText(chunk.text);
+          },
         }
       );
 
@@ -401,19 +404,20 @@ function KnowledgeMapContent() {
       const siblings = getNodeSiblingTitles(knowledgeMap.tree, node.id);
 
       const explanation = await ClientSideAiService.explainKnowledgeNode(
-        knowledgeMap.documentSummary,
-        node,
-        lineage,
-        siblings,
-        mode,
         aiConfig,
-        (text) => setStreamText(text),
-        (thinking) => setStreamThinking(thinking),
-        undefined,
         {
+          documentSummary: knowledgeMap.documentSummary,
+          targetNode: { title: node.title, description: node.description, depth: node.depth, firstPrincipleAnchor: node.firstPrincipleAnchor },
+          parentTitle: lineage[lineage.length - 2],
+          rootTitle: lineage[0],
+          siblingTitles: siblings,
+          mode,
           language,
           audienceMode,
-          reasoningEffort: modelReasoningEffort,
+          onStreamChunk: (chunk) => {
+            if (chunk.thinking) setStreamThinking(chunk.thinking);
+            if (chunk.text) setStreamText(chunk.text);
+          },
         }
       );
 

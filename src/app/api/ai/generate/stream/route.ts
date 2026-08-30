@@ -177,6 +177,73 @@ class StreamingThoughtExtractor {
   }
 }
 
+function normalizeCustomEndpoint(endpoint: string): string {
+  let ep = (endpoint || '').trim().replace(/\/+$/, '');
+  if (!ep) return '';
+
+  const lower = ep.toLowerCase();
+
+  // Groq
+  if (lower.includes('api.groq.com')) {
+    if (!lower.includes('/openai/v1')) {
+      ep = 'https://api.groq.com/openai/v1';
+    }
+  }
+  // OpenRouter
+  else if (lower.includes('openrouter.ai')) {
+    if (!lower.includes('/api/v1')) {
+      ep = 'https://openrouter.ai/api/v1';
+    }
+  }
+  // OpenAI
+  else if (lower.includes('api.openai.com')) {
+    if (!lower.includes('/v1')) {
+      ep = 'https://api.openai.com/v1';
+    }
+  }
+  // Cerebras
+  else if (lower.includes('api.cerebras.ai')) {
+    if (!lower.includes('/v1')) {
+      ep = 'https://api.cerebras.ai/v1';
+    }
+  }
+  // DeepSeek
+  else if (lower.includes('api.deepseek.com')) {
+    if (!lower.includes('/v1')) {
+      ep = 'https://api.deepseek.com/v1';
+    }
+  }
+  // Together AI
+  else if (lower.includes('api.together.xyz')) {
+    if (!lower.includes('/v1')) {
+      ep = 'https://api.together.xyz/v1';
+    }
+  }
+  // Ollama localhost
+  else if (lower.includes('localhost:11434') || lower.includes('127.0.0.1:11434')) {
+    if (!lower.includes('/v1')) {
+      ep = ep.replace(/\/+$/, '') + '/v1';
+    }
+  }
+
+  // Anthropic direct API
+  if (lower.includes('api.anthropic.com')) {
+    if (ep.endsWith('/chat/completions')) {
+      ep = ep.replace(/\/chat\/completions$/, '');
+    }
+    if (!ep.endsWith('/messages')) {
+      if (!ep.endsWith('/v1')) ep += '/v1';
+      ep += '/messages';
+    }
+    return ep;
+  }
+
+  if (!ep.endsWith('/chat/completions')) {
+    ep = ep.replace(/\/+$/, '') + '/chat/completions';
+  }
+  return ep;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -193,15 +260,12 @@ export async function POST(req: NextRequest) {
 
     // 1. Custom Provider Streaming (OpenAI-compatible)
     if (config.provider === 'custom') {
-      let endpoint = (config.customEndpoint || '').trim();
+      const endpoint = normalizeCustomEndpoint(config.customEndpoint || '');
       if (!endpoint) {
-        return new Response(JSON.stringify({ error: 'Custom LLM endpoint is not configured.' }), {
+        return new Response(JSON.stringify({ error: 'Custom LLM endpoint is not configured. Please set your endpoint in Settings.' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' },
         });
-      }
-      if (!endpoint.endsWith('/chat/completions')) {
-        endpoint = endpoint.replace(/\/+$/, '') + '/chat/completions';
       }
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -413,8 +477,6 @@ export async function POST(req: NextRequest) {
     const apiKey =
       config.geminiApiKey ||
       config.apiKey ||
-      process.env.GEMINI_API_KEY ||
-      process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
       '';
 
     if (!apiKey) {
@@ -424,9 +486,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const requestedModel = config.geminiModel || process.env.GEMINI_MODEL || 'gemini-3.7-flash';
+    const requestedModel = config.geminiModel || 'gemini-3.7-flash';
 
     const validImages = images ? images.filter((img: any) => img && img.data && typeof img.data === 'string' && img.data.length > 50) : [];
+    const imageCount = validImages.filter((img: any) => img.mimeType?.startsWith('image/')).length;
     const isReasoningDisabled = config.enableReasoning === false || config.thinkingBudget === 0;
 
     let effectivePrompt = prompt;

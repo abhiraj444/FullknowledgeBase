@@ -148,6 +148,73 @@ async function transcribeAudioViaGroq(
   }
 }
 
+function normalizeCustomEndpoint(endpoint: string): string {
+  let ep = (endpoint || '').trim().replace(/\/+$/, '');
+  if (!ep) return '';
+
+  const lower = ep.toLowerCase();
+
+  // Groq
+  if (lower.includes('api.groq.com')) {
+    if (!lower.includes('/openai/v1')) {
+      ep = 'https://api.groq.com/openai/v1';
+    }
+  }
+  // OpenRouter
+  else if (lower.includes('openrouter.ai')) {
+    if (!lower.includes('/api/v1')) {
+      ep = 'https://openrouter.ai/api/v1';
+    }
+  }
+  // OpenAI
+  else if (lower.includes('api.openai.com')) {
+    if (!lower.includes('/v1')) {
+      ep = 'https://api.openai.com/v1';
+    }
+  }
+  // Cerebras
+  else if (lower.includes('api.cerebras.ai')) {
+    if (!lower.includes('/v1')) {
+      ep = 'https://api.cerebras.ai/v1';
+    }
+  }
+  // DeepSeek
+  else if (lower.includes('api.deepseek.com')) {
+    if (!lower.includes('/v1')) {
+      ep = 'https://api.deepseek.com/v1';
+    }
+  }
+  // Together AI
+  else if (lower.includes('api.together.xyz')) {
+    if (!lower.includes('/v1')) {
+      ep = 'https://api.together.xyz/v1';
+    }
+  }
+  // Ollama localhost
+  else if (lower.includes('localhost:11434') || lower.includes('127.0.0.1:11434')) {
+    if (!lower.includes('/v1')) {
+      ep = ep.replace(/\/+$/, '') + '/v1';
+    }
+  }
+
+  // Anthropic direct API (uses /v1/messages instead of /chat/completions)
+  if (lower.includes('api.anthropic.com')) {
+    if (ep.endsWith('/chat/completions')) {
+      ep = ep.replace(/\/chat\/completions$/, '');
+    }
+    if (!ep.endsWith('/messages')) {
+      if (!ep.endsWith('/v1')) ep += '/v1';
+      ep += '/messages';
+    }
+    return ep;
+  }
+
+  if (!ep.endsWith('/chat/completions')) {
+    ep = ep.replace(/\/+$/, '') + '/chat/completions';
+  }
+  return ep;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -157,9 +224,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Prompt is required and must be a text string.' }, { status: 400 });
     }
 
-    // --- 1. Custom Provider Flow (OpenAI / OpenRouter / Groq / DeepSeek / Ollama) ---
+    // --- 1. Custom Provider Flow (OpenAI / OpenRouter / Groq / DeepSeek / Anthropic / Ollama) ---
     if (config.provider === 'custom') {
-      let endpoint = (config.customEndpoint || '').trim();
+      const endpoint = normalizeCustomEndpoint(config.customEndpoint || '');
       if (!endpoint) {
         return NextResponse.json(
           { error: 'Custom LLM endpoint is not configured. Please set your endpoint URL in Settings.' },
@@ -167,21 +234,23 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      if (!endpoint.endsWith('/chat/completions')) {
-        endpoint = endpoint.replace(/\/+$/, '') + '/chat/completions';
-      }
-
+      const isAnthropic = endpoint.includes('api.anthropic.com');
+      const key = config.customApiKey || config.apiKey;
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
-      const key = config.customApiKey || config.apiKey;
       if (key) {
-        headers['Authorization'] = `Bearer ${key}`;
+        if (isAnthropic) {
+          headers['x-api-key'] = key;
+          headers['anthropic-version'] = '2023-06-01';
+        } else {
+          headers['Authorization'] = `Bearer ${key}`;
+        }
       }
 
       // Detect if this is a Groq endpoint for special audio handling
       const isGroqEndpoint = endpoint.toLowerCase().includes('groq.com');
-      const imageCount = images ? images.filter((i) => i.mimeType?.startsWith('image/')).length : 0;
+      const imageCount = images ? images.filter((i: any) => i.mimeType?.startsWith('image/')).length : 0;
 
       // Process media: transcribe audio for providers that don't support inline audio
       let augmentedPrompt = prompt;
@@ -242,7 +311,6 @@ export async function POST(req: NextRequest) {
 
       const isOpenRouter = endpoint.toLowerCase().includes('openrouter.ai');
       const isOpenAi = endpoint.toLowerCase().includes('api.openai.com');
-      const isAnthropic = endpoint.toLowerCase().includes('anthropic.com');
       const modelNameLower = initialModel.toLowerCase();
 
       const payload: any = {
@@ -364,9 +432,16 @@ export async function POST(req: NextRequest) {
         }
 
         const data = await res.json();
-        const choice = data.choices?.[0]?.message;
-        let replyText = choice?.content || '';
-        let reasoning = choice?.reasoning_content || choice?.reasoning || choice?.thought || choice?.thinking || '';
+        let replyText = '';
+        let reasoning = '';
+
+        if (isAnthropic && data.content && Array.isArray(data.content)) {
+          replyText = data.content.map((c: any) => c.text || '').join('');
+        } else {
+          const choice = data.choices?.[0]?.message;
+          replyText = choice?.content || '';
+          reasoning = choice?.reasoning_content || choice?.reasoning || choice?.thought || choice?.thinking || '';
+        }
 
         // Extract inline <think> tags if present in replyText
         if (replyText && (replyText.includes('<think') || replyText.includes('<thought') || replyText.includes('<reasoning'))) {
@@ -399,21 +474,19 @@ export async function POST(req: NextRequest) {
     const apiKey =
       config.geminiApiKey ||
       config.apiKey ||
-      process.env.GEMINI_API_KEY ||
-      process.env.NEXT_PUBLIC_GEMINI_API_KEY ||
       '';
 
     if (!apiKey) {
       return NextResponse.json(
         {
           error:
-            'Google Gemini API Key is missing. Please set your API key in Settings (or set GEMINI_API_KEY in your Vercel Project Environment Variables).',
+            'Google Gemini API Key is missing. Please set your API key in Settings.',
         },
         { status: 400 }
       );
     }
 
-    const requestedModel = config.geminiModel || process.env.GEMINI_MODEL || 'gemini-3.7-flash';
+    const requestedModel = config.geminiModel || 'gemini-3.7-flash';
 
     const validImages = images ? images.filter((img: any) => img && img.data && typeof img.data === 'string' && img.data.length > 50) : [];
     const imageCount = validImages.filter((img: any) => img.mimeType?.startsWith('image/')).length;
