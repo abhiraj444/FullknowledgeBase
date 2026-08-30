@@ -62,11 +62,25 @@ function simpleMarkdownToHtml(md: string): string {
     .replace(/\\mathrm\{([^}]+)\}/g, '$1')
     .replace(/\\mathbf\{([^}]+)\}/g, '<strong>$1</strong>')
     .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
     .replace(/\\ge\b/g, '≥')
     .replace(/\\le\b/g, '≤')
+    .replace(/\\pm\b/g, '±')
+    .replace(/\\approx\b/g, '≈')
+    .replace(/\\times\b/g, '×')
+    .replace(/\\cdot\b/g, '·')
     .replace(/\\rightarrow\b/g, '→')
     .replace(/\\leftarrow\b/g, '←')
-    .replace(/\\degree\b/g, '°');
+    .replace(/\\uparrow\b/g, '↑')
+    .replace(/\\downarrow\b/g, '↓')
+    .replace(/\\Delta\b/g, 'Δ')
+    .replace(/\\degree\b/g, '°')
+    .replace(/\\circ\b/g, '°');
+
+  // Handle display formulas $$ ... $$
+  text = text.replace(/\$\$([^$]+)\$\$/g, (_, eq) => {
+    return `\n\n<div style="text-align: center; margin: 8px 0; padding: 6px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-family: 'Times New Roman', serif; font-size: 10.5pt; font-style: italic; color: #0f172a;">${formatMathString(eq)}</div>\n\n`;
+  });
 
   const lines = text.split('\n');
   const htmlLines: string[] = [];
@@ -80,6 +94,13 @@ function simpleMarkdownToHtml(md: string): string {
         htmlLines.push('</ul>');
         inList = false;
       }
+      continue;
+    }
+
+    // Pass-through preformatted display divs
+    if (trimmed.startsWith('<div style="text-align: center;')) {
+      if (inList) { htmlLines.push('</ul>'); inList = false; }
+      htmlLines.push(trimmed);
       continue;
     }
 
@@ -134,8 +155,33 @@ function simpleMarkdownToHtml(md: string): string {
   return htmlLines.join('\n');
 }
 
+function formatMathString(math: string): string {
+  return math
+    .replace(/\\mathrm\{([^}]+)\}/g, '$1')
+    .replace(/\\text\{([^}]+)\}/g, '$1')
+    .replace(/\\mathbf\{([^}]+)\}/g, '<strong>$1</strong>')
+    .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
+    .replace(/_\{([^}]+)\}/g, '<sub>$1</sub>')
+    .replace(/_([a-zA-Z0-9])/g, '<sub>$1</sub>')
+    .replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>')
+    .replace(/\^([a-zA-Z0-9+-])/g, '<sup>$1</sup>')
+    .replace(/\\approx/g, '≈')
+    .replace(/\\times/g, '×')
+    .replace(/\\ge/g, '≥')
+    .replace(/\\le/g, '≤')
+    .replace(/\\pm/g, '±')
+    .replace(/\\uparrow/g, '↑')
+    .replace(/\\downarrow/g, '↓');
+}
+
 function formatInline(str: string): string {
-  return str
+  // Convert inline math $...$ to styled formula
+  let res = str.replace(/\$([^$]+)\$/g, (_, math) => {
+    return `<span style="font-family: 'Times New Roman', serif; font-style: italic; color: #0f172a;">${formatMathString(math)}</span>`;
+  });
+
+  return res
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, '<code style="background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 8.5pt;">$1</code>');

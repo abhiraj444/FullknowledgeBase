@@ -3,6 +3,8 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 
 interface ClinicalMarkdownRendererProps {
   content: string;
@@ -65,38 +67,41 @@ function extractReadableContent(raw: string): string {
   return str;
 }
 
+/**
+ * Normalizes biomedical notation and escapes so KaTeX and Markdown render cleanly.
+ */
+function normalizeBiomedicalNotation(raw: string): string {
+  if (!raw) return '';
+
+  return raw
+    // Normalize unescaped double-backslashes from JSON decoding
+    .replace(/\\\\([a-zA-Z]+)/g, '\\$1')
+    // Support common clinical arrow and degree symbols inside or outside math
+    .replace(/\\uparrow\b/g, '↑')
+    .replace(/\\downarrow\b/g, '↓')
+    .replace(/\\rightarrow\b/g, '→')
+    .replace(/\\leftarrow\b/g, '←')
+    .replace(/\\Delta\b/g, 'Δ')
+    .replace(/\\degree\b/g, '°')
+    .replace(/\\circ\b/g, '°')
+    .replace(/\\pm\b/g, '±')
+    .replace(/\\ge\b/g, '≥')
+    .replace(/\\le\b/g, '≤')
+    .replace(/\\times\b/g, '×')
+    .replace(/\\cdot\b/g, '·');
+}
+
 export function ClinicalMarkdownRenderer({ content, className = '' }: ClinicalMarkdownRendererProps) {
   if (!content) return null;
 
   const rawCleaned = extractReadableContent(content);
-
-  // Clean raw LaTeX or double escaped backslashes for clean medical reading
-  const sanitizedContent = rawCleaned
-    .replace(/\\text\{([^}]+)\}/g, '$1')
-    .replace(/\\mathrm\{([^}]+)\}/g, '$1')
-    .replace(/\\mathbf\{([^}]+)\}/g, '**$1**')
-    .replace(/\\textbf\{([^}]+)\}/g, '**$1**')
-    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
-    .replace(/\\ge\b/g, '≥')
-    .replace(/\\le\b/g, '≤')
-    .replace(/\\pm\b/g, '±')
-    .replace(/\\approx\b/g, '≈')
-    .replace(/\\times\b/g, '×')
-    .replace(/\\cdot\b/g, '·')
-    .replace(/\\rightarrow\b/g, '→')
-    .replace(/\\leftarrow\b/g, '←')
-    .replace(/\\mu\b/g, 'µ')
-    .replace(/\\alpha\b/g, 'α')
-    .replace(/\\beta\b/g, 'β')
-    .replace(/\\gamma\b/g, 'γ')
-    .replace(/\\Delta\b/g, 'Δ')
-    .replace(/\\degree\b/g, '°')
-    .replace(/\\circ\b/g, '°');
+  const sanitizedContent = normalizeBiomedicalNotation(rawCleaned);
 
   return (
     <div className={`prose prose-sm dark:prose-invert max-w-none break-words font-sans ${className}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
         components={{
           h1: ({ children }) => (
             <h1 className="text-base sm:text-lg font-bold text-foreground mt-3 mb-1.5 border-b border-border pb-1">

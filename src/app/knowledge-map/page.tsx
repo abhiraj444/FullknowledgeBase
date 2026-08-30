@@ -242,27 +242,46 @@ function KnowledgeMapContent() {
 
     try {
       // 1. Prepare images if any
-      let processedImages = uploadedFiles;
+      let rawImages = uploadedFiles;
       if (uploadedFiles.length > 0 && compressImages) {
-        processedImages = await compressImagesForAi(uploadedFiles);
+        rawImages = await compressImagesForAi(uploadedFiles);
       }
-      const inlineImages = await prepareImagesForAiPrompt(processedImages);
+      const { processedImages: imagesForAi, summaryText: prepSummary } = await prepareImagesForAiPrompt(rawImages, {
+        compressEnabled: compressImages,
+        targetKb: 50,
+      });
 
-      // 2. Prepare audio transcript context
-      const fullText = [
-        topicInput.trim(),
-        audioTranscripts.length > 0 ? `Voice Memo Notes: ${audioTranscripts.join('\n')}` : '',
-        `Learning Focus Goal: ${learningGoal}`,
-      ]
-        .filter(Boolean)
-        .join('\n\n');
+      // 2. Prepare user prompt context
+      const userText = topicInput.trim();
+      const hasImages = imagesForAi.length > 0;
+      
+      const parts: string[] = [];
+      if (userText) {
+        parts.push(`Topic / Questions / Instructions:\n${userText}`);
+      } else if (hasImages) {
+        parts.push(`[Analyze and deconstruct all clinical topics, lab parameters, notes, diagrams, and medical concepts directly from the attached visual document pages into the knowledge map.]`);
+      }
+      
+      if (prepSummary) {
+        parts.push(`[Attachment Information: ${prepSummary}]`);
+      }
+      
+      if (audioTranscripts.length > 0) {
+        parts.push(`Voice Notes / Dictation:\n${audioTranscripts.join('\n')}`);
+      }
+      
+      if (learningGoal && learningGoal !== 'comprehensive') {
+        parts.push(`Learning Focus Goal: ${learningGoal}`);
+      }
+
+      const fullText = parts.join('\n\n');
 
       // 3. Call AI Service
       const mapResult = await ClientSideAiService.generateKnowledgeMap(
         aiConfig,
         {
           text: fullText,
-          images: inlineImages,
+          images: imagesForAi,
           language,
           audienceMode,
           onStreamChunk: (chunk) => {

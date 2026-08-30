@@ -297,10 +297,27 @@ async function optimizeImageForAiVision(dataUriOrBase64: string, mimeType: strin
 }
 
 /**
- * Normalizes and extracts clean MIME type and pure Base64 data from any media input (audio, image, PDF, blob URLs).
+ * Normalizes and extracts clean MIME type and pure Base64 data from any media input (audio, image, PDF, blob URLs, or objects).
  */
-export async function normalizeMediaForGemini(mediaInput: string): Promise<{ data: string; mimeType: string } | null> {
-    if (!mediaInput || typeof mediaInput !== 'string') return null;
+export async function normalizeMediaForGemini(mediaInput: any): Promise<{ data: string; mimeType: string } | null> {
+    if (!mediaInput) return null;
+
+    if (typeof mediaInput === 'object') {
+        if (mediaInput.data && typeof mediaInput.data === 'string') {
+            const rawMime = (mediaInput.mimeType || 'image/jpeg').trim();
+            const sanitizedMime = sanitizeMimeType(rawMime);
+            if (sanitizedMime.startsWith('image/')) {
+                return optimizeImageForAiVision(mediaInput.data, sanitizedMime);
+            }
+            return { data: mediaInput.data, mimeType: sanitizedMime };
+        }
+        if (mediaInput.url && typeof mediaInput.url === 'string') {
+            return normalizeMediaForGemini(mediaInput.url);
+        }
+        return null;
+    }
+
+    if (typeof mediaInput !== 'string') return null;
     let target = mediaInput.trim();
 
     // If Blob or HTTP(S) URL, resolve asynchronously
