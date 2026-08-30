@@ -29,6 +29,8 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const onResultRef = useRef(onResult);
   const accumulatedTextRef = useRef('');
   const currentSessionWordsRef = useRef(0);
+  const lastFinalizedIndexRef = useRef<number>(-1);
+  const lastEmittedChunkRef = useRef<string>('');
   const restartTimerRef = useRef<NodeJS.Timeout | null>(null);
   const durationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -55,6 +57,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
+      // Keep UI steady in listening mode
       setIsListening(true);
       setStatus('listening');
       setError(null);
@@ -64,13 +67,30 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       let newlyFinalizedChunk = '';
       let currentInterim = '';
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      const resultsLength = event.results ? event.results.length : 0;
+
+      for (let i = 0; i < resultsLength; i++) {
         const item = event.results[i];
+        if (!item) continue;
         const piece = item[0]?.transcript || '';
+
         if (item.isFinal) {
-          newlyFinalizedChunk += piece;
+          // Process each result index only ONCE per speech session
+          if (i > lastFinalizedIndexRef.current) {
+            lastFinalizedIndexRef.current = i;
+            const trimmedPiece = piece.trim();
+            if (trimmedPiece && trimmedPiece !== lastEmittedChunkRef.current) {
+              lastEmittedChunkRef.current = trimmedPiece;
+              newlyFinalizedChunk = newlyFinalizedChunk
+                ? `${newlyFinalizedChunk} ${trimmedPiece}`
+                : trimmedPiece;
+            }
+          }
         } else {
-          currentInterim += piece;
+          // Gather interim text only for non-finalized indices
+          if (i > lastFinalizedIndexRef.current) {
+            currentInterim = currentInterim ? `${currentInterim} ${piece}` : piece;
+          }
         }
       }
 
@@ -84,6 +104,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
           setInterimText('');
           const words = trimmed.split(/\s+/).filter(Boolean).length;
           currentSessionWordsRef.current += words;
+          // Send ONLY the newly finalized fragment to callback
           onResultRef.current?.(trimmed);
         }
       } else if (currentInterim) {
@@ -92,10 +113,11 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
     };
 
     recognition.onerror = (event: any) => {
-      console.warn('Speech recognition event error:', event.error);
-      if (event.error === 'no-speech') {
+      // no-speech or aborted during silent pause is normal in Web Speech API
+      if (event.error === 'no-speech' || event.error === 'aborted') {
         return;
       }
+      console.warn('Speech recognition event error:', event.error);
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         setError('Microphone permission denied. Please allow microphone access.');
         setStatus('error');
@@ -103,25 +125,36 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
         setIsListening(false);
       } else {
         setError(`Voice error: ${event.error}`);
-        setStatus('error');
       }
     };
 
     recognition.onend = () => {
+      // If active listening was not intentionally stopped, restart seamlessly without toggling isListening
       if (shouldListenRef.current) {
+        lastFinalizedIndexRef.current = -1; // Reset index for new recognition cycle
         if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
         restartTimerRef.current = setTimeout(() => {
           if (shouldListenRef.current && recognitionRef.current) {
             try {
               recognitionRef.current.start();
-            } catch (err) {
-              console.warn('Auto-restart recognition note:', err);
-              setIsListening(false);
-              shouldListenRef.current = false;
-              setStatus('idle');
+            } catch (err: any) {
+              if (err?.name !== 'InvalidStateError') {
+                // Retry after small fallback if browser mic busy
+                setTimeout(() => {
+                  if (shouldListenRef.current && recognitionRef.current) {
+                    try {
+                      recognitionRef.current.start();
+                    } catch {
+                      setIsListening(false);
+                      shouldListenRef.current = false;
+                      setStatus('idle');
+                    }
+                  }
+                }, 200);
+              }
             }
           }
-        }, 150);
+        }, 80);
       } else {
         setIsListening(false);
         if (statusRef.current !== 'error') {
@@ -154,11 +187,14 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
   const startListening = useCallback(async () => {
     setError(null);
     accumulatedTextRef.current = '';
+    lastEmittedChunkRef.current = '';
+    lastFinalizedIndexRef.current = -1;
     currentSessionWordsRef.current = 0;
     setTranscript('');
     setInterimText('');
     setSessionSeconds(0);
     shouldListenRef.current = true;
+    setIsListening(true);
     setStatus('listening');
 
     if (durationTimerRef.current) clearInterval(durationTimerRef.current);
@@ -171,17 +207,16 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
         recognitionRef.current.start();
       } catch (e: any) {
         if (e?.name === 'InvalidStateError') {
-          // Already active, ignore
+          // Already running
           setIsListening(true);
         } else {
           console.warn('Speech recognition start note:', e);
-          // Try userMedia permission verification if recognition failed
           if (navigator.mediaDevices?.getUserMedia) {
             try {
               const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
               stream.getTracks().forEach((track) => track.stop());
               recognitionRef.current.start();
-            } catch (err: any) {
+            } catch {
               setError('Microphone permission denied. Please allow microphone access.');
               setStatus('error');
               shouldListenRef.current = false;
@@ -215,7 +250,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
       try {
         recognitionRef.current.stop();
       } catch (e) {
-        console.error('Failed to stop speech recognition:', e);
+        console.warn('Failed to stop speech recognition:', e);
       }
     }
   }, []);

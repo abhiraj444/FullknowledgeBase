@@ -268,9 +268,22 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      const isAnthropic = endpoint.toLowerCase().includes('anthropic.com');
+      const isOpenRouter = endpoint.toLowerCase().includes('openrouter.ai');
+      const isOpenAi = endpoint.toLowerCase().includes('api.openai.com');
+      const modelName = (config.customModel || 'gpt-4o').toLowerCase();
+
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       const key = config.customApiKey || config.apiKey;
-      if (key) headers['Authorization'] = `Bearer ${key}`;
+      if (key) {
+        if (isAnthropic) {
+          headers['x-api-key'] = key;
+          headers['anthropic-version'] = '2023-06-01';
+          headers['anthropic-dangerous-direct-browser-access'] = 'true';
+        } else {
+          headers['Authorization'] = `Bearer ${key}`;
+        }
+      }
 
       const isReasoningDisabled = config.enableReasoning === false || config.thinkingBudget === 0;
 
@@ -295,17 +308,16 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const isOpenRouter = endpoint.toLowerCase().includes('openrouter.ai');
-      const isOpenAi = endpoint.toLowerCase().includes('api.openai.com');
-      const isAnthropic = endpoint.toLowerCase().includes('anthropic.com');
-      const modelName = (config.customModel || 'gpt-4o').toLowerCase();
-
       const payload: any = {
         model: config.customModel || 'gpt-4o',
         messages: [{ role: 'user', content: contentParts.length === 1 ? augmentedPrompt : contentParts }],
         temperature: 0.2,
         stream: true,
       };
+
+      if (isAnthropic) {
+        payload.max_tokens = 4096;
+      }
 
       if (isReasoningDisabled) {
         if (isOpenRouter) {
@@ -416,9 +428,35 @@ export async function POST(req: NextRequest) {
                 try {
                   const jsonStr = trimmed.replace(/^data:\s*/, '');
                   const parsed = JSON.parse(jsonStr);
-                  const delta = parsed.choices?.[0]?.delta || {};
-                  const content = delta.content || '';
-                  const explicitReasoning = delta.reasoning_content || delta.reasoning || delta.thought || delta.thinking || '';
+
+                  if (parsed.type === 'message_stop') {
+                    const flushed = thoughtExtractor.flush();
+                    if (flushed.text || flushed.thinking) {
+                      controller.enqueue(
+                        encoder.encode(
+                          `data: ${JSON.stringify({ text: flushed.text, thinking: flushed.thinking, modelUsed: payload.model })}\n\n`
+                        )
+                      );
+                    }
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true, modelUsed: payload.model })}\n\n`));
+                    continue;
+                  }
+
+                  const delta = parsed.choices?.[0]?.delta || parsed.choices?.[0]?.message || parsed.delta || {};
+                  const content =
+                    (typeof delta.content === 'string' ? delta.content : '') ||
+                    (typeof parsed.choices?.[0]?.text === 'string' ? parsed.choices[0].text : '') ||
+                    (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta' && typeof parsed.delta?.text === 'string' ? parsed.delta.text : '') ||
+                    (typeof parsed.message?.content === 'string' ? parsed.message.content : '') ||
+                    (typeof parsed.response === 'string' ? parsed.response : '');
+
+                  const explicitReasoning =
+                    (typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '') ||
+                    (typeof delta.reasoning === 'string' ? delta.reasoning : '') ||
+                    (typeof delta.thought === 'string' ? delta.thought : '') ||
+                    (typeof delta.thinking === 'string' ? delta.thinking : '') ||
+                    (parsed.type === 'content_block_delta' && parsed.delta?.type === 'thinking_delta' && typeof parsed.delta?.thinking === 'string' ? parsed.delta.thinking : '') ||
+                    '';
 
                   let extractedText = '';
                   let extractedThinking = explicitReasoning;

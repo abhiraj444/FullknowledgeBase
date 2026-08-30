@@ -1032,7 +1032,14 @@ function ContentGeneratorContent() {
                       <div className="flex items-center gap-1.5">
                         <VoiceInputButton
                           onTranscript={(text) => {
-                            setQuestion((prev) => (prev ? `${prev} ${text}` : text));
+                            const clean = text.trim();
+                            if (!clean) return;
+                            setQuestion((prev) => {
+                              const cur = (prev || '').trim();
+                              if (!cur) return clean;
+                              if (cur.endsWith(clean)) return cur;
+                              return `${cur} ${clean}`;
+                            });
                           }}
                           size="sm"
                           variant="ghost"
@@ -1249,7 +1256,14 @@ function ContentGeneratorContent() {
                       </Label>
                       <VoiceInputButton
                         onTranscript={(text) => {
-                          setTopic((prev) => (prev ? `${prev} ${text}` : text));
+                          const clean = text.trim();
+                          if (!clean) return;
+                          setTopic((prev) => {
+                            const cur = (prev || '').trim();
+                            if (!cur) return clean;
+                            if (cur.endsWith(clean)) return cur;
+                            return `${cur} ${clean}`;
+                          });
                         }}
                         size="sm"
                         variant="ghost"

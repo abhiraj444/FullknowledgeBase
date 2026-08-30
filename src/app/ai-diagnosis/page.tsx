@@ -841,7 +841,14 @@ function AiDiagnosisContent() {
                     <div className="flex items-center gap-1.5">
                       <VoiceInputButton
                         onTranscript={(text) => {
-                          setPatientData((prev) => (prev ? `${prev} ${text}` : text));
+                          const clean = text.trim();
+                          if (!clean) return;
+                          setPatientData((prev) => {
+                            const cur = (prev || '').trim();
+                            if (!cur) return clean;
+                            if (cur.endsWith(clean)) return cur;
+                            return `${cur} ${clean}`;
+                          });
                         }}
                         size="sm"
                         variant="ghost"

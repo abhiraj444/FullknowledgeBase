@@ -544,7 +544,14 @@ export function FollowUpChat({
 
                 <VoiceInputButton
                   onTranscript={(text) => {
-                    setCustomQuestion((prev) => (prev ? `${prev} ${text}` : text));
+                    const clean = text.trim();
+                    if (!clean) return;
+                    setCustomQuestion((prev) => {
+                      const cur = (prev || '').trim();
+                      if (!cur) return clean;
+                      if (cur.endsWith(clean)) return cur;
+                      return `${cur} ${clean}`;
+                    });
                   }}
                   size="sm"
                   variant="ghost"

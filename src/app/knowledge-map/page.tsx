@@ -37,6 +37,7 @@ import {
   Settings,
   ArrowRight,
   RotateCcw,
+  Square,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useSettings } from '@/context/SettingsContext';
@@ -240,36 +241,28 @@ function KnowledgeMapContent() {
     abortControllerRef.current = new AbortController();
 
     try {
-      // 1. Prepare images/PDFs if any
-      let imagesForAi: string[] = [];
-      if (uploadedFiles.length > 0) {
-        setStreamStep(`Ingesting & preparing ${uploadedFiles.length} document/image file(s)...`);
-        const prepResult = await prepareImagesForAiPrompt(uploadedFiles, {
-          compressEnabled: compressImages,
-          targetKb: 60,
-          mergeIntoSingle: false,
-        });
-        imagesForAi = prepResult.processedImages || [];
+      // 1. Prepare images if any
+      let processedImages = uploadedFiles;
+      if (uploadedFiles.length > 0 && compressImages) {
+        processedImages = await compressImagesForAi(uploadedFiles);
       }
+      const inlineImages = await prepareImagesForAiPrompt(processedImages);
 
-      // 2. Prepare user prompt context
-      const userTopic = topicInput.trim();
-      const textParts: string[] = [];
-      if (userTopic) {
-        textParts.push(`User Topic / Questions:\n${userTopic}`);
-      }
-      if (audioTranscripts.length > 0) {
-        textParts.push(`Voice Memo Notes:\n${audioTranscripts.join('\n')}`);
-      }
-      textParts.push(`Learning Focus Goal: ${learningGoal}`);
-      const fullText = textParts.join('\n\n');
+      // 2. Prepare audio transcript context
+      const fullText = [
+        topicInput.trim(),
+        audioTranscripts.length > 0 ? `Voice Memo Notes: ${audioTranscripts.join('\n')}` : '',
+        `Learning Focus Goal: ${learningGoal}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
 
       // 3. Call AI Service
       const mapResult = await ClientSideAiService.generateKnowledgeMap(
         aiConfig,
         {
           text: fullText,
-          images: imagesForAi,
+          images: inlineImages,
           language,
           audienceMode,
           onStreamChunk: (chunk) => {
@@ -313,7 +306,7 @@ function KnowledgeMapContent() {
         description: `Constructed ${countTotalNodes(mapResult.tree)} structured topics with first-principles anchors.`,
       });
     } catch (err: any) {
-      if (err?.name === 'AbortError' || abortControllerRef.current?.signal.aborted) {
+      if (err?.name === 'AbortError' || abortControllerRef.current?.signal.aborted || ClientSideAiService.isAbortError(err)) {
         toast({ title: 'Generation Cancelled', description: 'Request was aborted.' });
       } else {
         console.error('Error generating knowledge map:', err);
@@ -329,14 +322,32 @@ function KnowledgeMapContent() {
     }
   };
 
+  // Stop ongoing AI generation request
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsGenerating(false);
+    setIsDissectingNodeId(null);
+    setIsExplainingNodeId(null);
+    setStreamStep('');
+    toast({
+      title: 'AI Generation Stopped',
+      description: 'The running AI request was cancelled.',
+    });
+  };
+
   // Dissect a specific node into 3-6 deeper subtopics
   const handleDissectNode = async (node: KnowledgeTreeNode) => {
     if (!knowledgeMap || !isConfigured) return;
 
+    abortControllerRef.current = new AbortController();
     setIsDissectingNodeId(node.id);
     setStreamStep(`Dissecting "${node.title}" into granular sub-principles...`);
     setStreamThinking('');
     setStreamText('');
+    setStreamModelName(formatModelDisplayName(activeModel));
 
     try {
       const lineage = getNodeLineageTitles(knowledgeMap.tree, node.id);
@@ -355,7 +366,9 @@ function KnowledgeMapContent() {
           onStreamChunk: (chunk) => {
             if (chunk.thinking) setStreamThinking(chunk.thinking);
             if (chunk.text) setStreamText(chunk.text);
+            if (chunk.modelUsed) setStreamModelName(formatModelDisplayName(chunk.modelUsed));
           },
+          signal: abortControllerRef.current.signal,
         }
       );
 
@@ -374,12 +387,16 @@ function KnowledgeMapContent() {
         description: `Added ${subNodes.length} granular sub-principles under "${node.title}".`,
       });
     } catch (err: any) {
-      console.error('Dissect node error:', err);
-      toast({
-        title: 'Dissection Failed',
-        description: err.message || 'Could not dissect subtopic.',
-        variant: 'destructive',
-      });
+      if (err?.name === 'AbortError' || abortControllerRef.current?.signal.aborted || ClientSideAiService.isAbortError(err)) {
+        toast({ title: 'Dissection Stopped', description: 'Request was cancelled.' });
+      } else {
+        console.error('Dissect node error:', err);
+        toast({
+          title: 'Dissection Failed',
+          description: err.message || 'Could not dissect subtopic.',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setIsDissectingNodeId(null);
       setStreamStep('');
@@ -393,6 +410,7 @@ function KnowledgeMapContent() {
   ) => {
     if (!knowledgeMap || !isConfigured) return;
 
+    abortControllerRef.current = new AbortController();
     setIsExplainingNodeId(node.id);
     setActiveNodeId(node.id);
     setMobileActiveTab('study');
@@ -406,6 +424,7 @@ function KnowledgeMapContent() {
     setStreamStep(`Deriving ${modeLabels[mode]} for "${node.title}"...`);
     setStreamThinking('');
     setStreamText('');
+    setStreamModelName(formatModelDisplayName(activeModel));
 
     try {
       const lineage = getNodeLineageTitles(knowledgeMap.tree, node.id);
@@ -425,7 +444,9 @@ function KnowledgeMapContent() {
           onStreamChunk: (chunk) => {
             if (chunk.thinking) setStreamThinking(chunk.thinking);
             if (chunk.text) setStreamText(chunk.text);
+            if (chunk.modelUsed) setStreamModelName(formatModelDisplayName(chunk.modelUsed));
           },
+          signal: abortControllerRef.current.signal,
         }
       );
 
@@ -444,12 +465,16 @@ function KnowledgeMapContent() {
         description: `Derived ${modeLabels[mode]} for "${node.title}".`,
       });
     } catch (err: any) {
-      console.error('Explain node error:', err);
-      toast({
-        title: 'Explanation Failed',
-        description: err.message || 'Could not generate explanation.',
-        variant: 'destructive',
-      });
+      if (err?.name === 'AbortError' || abortControllerRef.current?.signal.aborted || ClientSideAiService.isAbortError(err)) {
+        toast({ title: 'Explanation Stopped', description: 'Request was cancelled.' });
+      } else {
+        console.error('Explain node error:', err);
+        toast({
+          title: 'Explanation Failed',
+          description: err.message || 'Could not generate explanation.',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setIsExplainingNodeId(null);
       setStreamStep('');
@@ -536,6 +561,21 @@ function KnowledgeMapContent() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Active AI Stop Button */}
+          {(isGenerating || Boolean(isDissectingNodeId) || Boolean(isExplainingNodeId)) && (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={handleStopGeneration}
+              className="text-xs gap-1.5 font-bold animate-pulse shadow-sm"
+              title="Stop ongoing AI generation"
+            >
+              <Square className="h-3.5 w-3.5 fill-current" />
+              <span>Stop AI Request</span>
+            </Button>
+          )}
+
           {knowledgeMap && (
             <>
               {/* PDF Printable Export Button */}
@@ -605,7 +645,16 @@ function KnowledgeMapContent() {
                   Topic, Question, Syllabus Excerpt, or Clinical Problem:
                 </Label>
                 <VoiceInputButton
-                  onTranscript={(txt) => setTopicInput((prev) => prev ? `${prev} ${txt}` : txt)}
+                  onTranscript={(txt) => {
+                    const clean = txt.trim();
+                    if (!clean) return;
+                    setTopicInput((prev) => {
+                      const cur = (prev || '').trim();
+                      if (!cur) return clean;
+                      if (cur.endsWith(clean)) return cur;
+                      return `${cur} ${clean}`;
+                    });
+                  }}
                   label="Dictate Topic"
                   size="sm"
                   variant="ghost"
@@ -778,6 +827,18 @@ function KnowledgeMapContent() {
 
               <div className="flex items-center gap-2">
                 <ModeLanguageSelector />
+                {isGenerating && (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={handleStopGeneration}
+                    className="text-xs font-bold gap-1.5 shadow-xs animate-pulse"
+                    title="Stop ongoing knowledge map generation"
+                  >
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                    <span>Stop Request</span>
+                  </Button>
+                )}
                 <Button
                   onClick={handleGenerateKnowledgeMap}
                   disabled={isGenerating || isProcessingPdf}
@@ -804,11 +865,12 @@ function KnowledgeMapContent() {
       {/* Streaming Thinking Process Box during generation */}
       {isGenerating && (
         <AiStreamingRawLogBox
-          step={streamStep}
-          thinkingProcess={streamThinking}
+          currentStep={streamStep || 'Constructing hierarchical knowledge tree...'}
+          thinkingText={streamThinking}
           streamText={streamText}
           modelName={streamModelName}
           isStreaming={true}
+          onStop={handleStopGeneration}
         />
       )}
 
@@ -955,6 +1017,7 @@ function KnowledgeMapContent() {
                 onDissect={handleDissectNode}
                 onExplain={handleExplainNode}
                 onUpdateNotes={handleUpdateNotes}
+                onStop={handleStopGeneration}
                 isExplaining={Boolean(isExplainingNodeId && isExplainingNodeId === activeNodeId)}
                 isDissecting={Boolean(isDissectingNodeId && isDissectingNodeId === activeNodeId)}
                 streamThinking={streamThinking}

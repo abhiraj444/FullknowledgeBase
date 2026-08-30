@@ -297,30 +297,10 @@ async function optimizeImageForAiVision(dataUriOrBase64: string, mimeType: strin
 }
 
 /**
- * Normalizes and extracts clean MIME type and pure Base64 data from any media input (audio, image, PDF, blob URLs, or objects).
+ * Normalizes and extracts clean MIME type and pure Base64 data from any media input (audio, image, PDF, blob URLs).
  */
-export async function normalizeMediaForGemini(mediaInput: any): Promise<{ data: string; mimeType: string } | null> {
-    if (!mediaInput) return null;
-
-    // Handle object inputs { data, mimeType } or { dataUrl }
-    if (typeof mediaInput === 'object') {
-        if (mediaInput.data && typeof mediaInput.data === 'string') {
-            const rawData = mediaInput.data.includes('base64,') ? mediaInput.data.split('base64,')[1] : mediaInput.data;
-            const mime = sanitizeMimeType(mediaInput.mimeType || 'image/jpeg');
-            if (mime.startsWith('image/')) {
-                return optimizeImageForAiVision(rawData, mime);
-            }
-            return { data: rawData, mimeType: mime };
-        }
-        if (mediaInput.dataUrl && typeof mediaInput.dataUrl === 'string') {
-            mediaInput = mediaInput.dataUrl;
-        } else if (mediaInput.base64 && typeof mediaInput.base64 === 'string') {
-            const mime = sanitizeMimeType(mediaInput.mimeType || 'image/jpeg');
-            return { data: mediaInput.base64, mimeType: mime };
-        }
-    }
-
-    if (typeof mediaInput !== 'string') return null;
+export async function normalizeMediaForGemini(mediaInput: string): Promise<{ data: string; mimeType: string } | null> {
+    if (!mediaInput || typeof mediaInput !== 'string') return null;
     let target = mediaInput.trim();
 
     // If Blob or HTTP(S) URL, resolve asynchronously
@@ -2170,7 +2150,7 @@ ${JSON.stringify(
         apiKeyOrConfig: string | AiConfig,
         input: {
             text?: string;
-            images?: any[];
+            images?: Array<{ data: string; mimeType: string }>;
             language?: TargetLanguage;
             audienceMode?: AudienceMode;
             onStreamChunk?: (payload: StreamChunkCallbackPayload) => void;
@@ -2179,32 +2159,6 @@ ${JSON.stringify(
     ): Promise<{ title: string; documentSummary: string; tree: KnowledgeTreeNode[] }> {
         const language = input.language || 'en';
         const audienceMode = input.audienceMode || 'doctor';
-        const hasImages = Array.isArray(input.images) && input.images.length > 0;
-        const rawText = (input.text || '').trim();
-
-        // Check whether user provided explicit topic text or only learning focus goal
-        const isDefaultOrOnlyGoal = !rawText || /^learning focus goal:/i.test(rawText);
-
-        let userMaterialSection = '';
-        if (hasImages && isDefaultOrOnlyGoal) {
-            userMaterialSection = `[DOCUMENT / PDF / IMAGE ATTACHMENTS PROVIDED: ${input.images!.length} visual page(s) attached.]
-PRIMARY INSTRUCTION:
-No text was typed into the topic text box. You MUST thoroughly examine, read, and transcribe ALL visual text, diagrams, formulas, clinical cases, exam questions, tables, and notes visible in the attached document/image pages.
-Based strictly and completely on the content of the attached document:
-1. Deduce the exact subject name / document topic and set it as the "title".
-2. Synthesize a comprehensive 3-4 paragraph "documentSummary" of everything covered in the document.
-3. Build the hierarchical "tree" organizing all major topics, subtopics, mechanisms, and high-yield concepts present in the document.`;
-        } else if (hasImages && !isDefaultOrOnlyGoal) {
-            userMaterialSection = `[DOCUMENT / PDF / IMAGE ATTACHMENTS PROVIDED: ${input.images!.length} visual page(s) attached along with user focus query.]
-User Query & Context:
-${rawText}
-
-PRIMARY INSTRUCTION:
-Examine both the attached document/image pages AND the user query above. Extract all relevant syllabus domains, exam questions, findings, and mechanisms directly from the document to build the knowledge tree.`;
-        } else {
-            userMaterialSection = `User Study Topic / Input Material:
-${rawText || 'Clinical Subject Dissection & Hierarchical Knowledge Map'}`;
-        }
 
         const prompt = `You are a master academic educator, subject matter expert, and first-principles knowledge architect.
 Analyze the provided document pages, notes, previous year questions (PYQ), or study topic.
@@ -2220,7 +2174,7 @@ Analyze the provided document pages, notes, previous year questions (PYQ), or st
    - Include a "firstPrincipleAnchor" on key nodes explaining the ground-truth principle in 1 sentence.
 
 **User Material / Input:**
-${userMaterialSection}
+${input.text ? input.text : '[Visual document/image pages attached. Extract and organize all topics directly from the attachments.]'}
 
 **Audience & Language:**
 - Target Language: ${language.toUpperCase()}
@@ -2517,7 +2471,8 @@ Produce the complete Markdown explanation directly without meta-commentary.`;
             { signal: input.signal }
         );
 
-        return stripThinkingTags(markdownText).trim();
+        const { cleanText } = stripThinkingTags(markdownText || '');
+        return cleanText.trim();
     },
     isAbortError,
     formatModelDisplayName,

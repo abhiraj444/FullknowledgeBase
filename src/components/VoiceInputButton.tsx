@@ -13,6 +13,7 @@ interface VoiceInputButtonProps {
   variant?: 'default' | 'outline' | 'secondary' | 'ghost';
   disabled?: boolean;
   showFeedbackBadge?: boolean;
+  label?: string;
 }
 
 export function VoiceInputButton({
@@ -22,6 +23,7 @@ export function VoiceInputButton({
   variant = 'outline',
   disabled = false,
   showFeedbackBadge = true,
+  label,
 }: VoiceInputButtonProps) {
   const [lastNotification, setLastNotification] = useState<{
     words: number;
@@ -100,6 +102,7 @@ export function VoiceInputButton({
               ) : (
                 <Mic className="h-4 w-4 shrink-0" />
               )}
+              {label ? <span className="text-xs font-medium ml-1">{isListening ? 'Listening...' : label}</span> : null}
               <span className="sr-only">{isListening ? 'Stop dictation' : 'Voice dictation'}</span>
             </Button>
           </TooltipTrigger>

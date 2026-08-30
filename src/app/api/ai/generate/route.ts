@@ -324,6 +324,10 @@ export async function POST(req: NextRequest) {
         temperature: 0.2,
       };
 
+      if (isAnthropic) {
+        payload.max_tokens = 4096;
+      }
+
       if (isReasoningDisabled) {
         if (isOpenRouter) {
           payload.reasoning = { effort: 'none', exclude: true };

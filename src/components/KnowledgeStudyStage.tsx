@@ -18,6 +18,7 @@ import {
   RefreshCw,
   X,
   Layers,
+  Square,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -39,6 +40,7 @@ interface KnowledgeStudyStageProps {
   onDissect: (node: KnowledgeTreeNode) => void;
   onExplain: (node: KnowledgeTreeNode, mode: 'standard' | 'first_principles' | 'simplified') => void;
   onUpdateNotes: (nodeId: string, notes: string) => void;
+  onStop?: () => void;
   isExplaining?: boolean;
   isDissecting?: boolean;
   streamThinking?: string;
@@ -56,6 +58,7 @@ export function KnowledgeStudyStage({
   onDissect,
   onExplain,
   onUpdateNotes,
+  onStop,
   isExplaining = false,
   isDissecting = false,
   streamThinking = '',
@@ -106,7 +109,11 @@ export function KnowledgeStudyStage({
   };
 
   const handleVoiceTranscription = (transcript: string) => {
-    const updated = userNotes.trim() ? `${userNotes.trim()}\n\n${transcript}` : transcript;
+    const clean = transcript.trim();
+    if (!clean) return;
+    const current = userNotes.trim();
+    if (current.endsWith(clean)) return;
+    const updated = current ? `${current}\n\n${clean}` : clean;
     onUpdateNotes(node.id, updated);
     toast({ title: 'Voice Note Added', description: 'Transcribed dictation appended to personal notes.' });
   };
@@ -163,13 +170,28 @@ export function KnowledgeStudyStage({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Stop Button when Generating */}
+            {(isExplaining || isDissecting) && onStop && (
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                onClick={onStop}
+                className="h-8 text-xs gap-1.5 font-medium shadow-sm animate-pulse"
+                title="Stop AI Generation"
+              >
+                <Square className="h-3.5 w-3.5 fill-current" />
+                <span>Stop</span>
+              </Button>
+            )}
+
             {/* Dissect Button */}
             <Button
               type="button"
               size="sm"
               variant="outline"
               onClick={() => onDissect(node)}
-              disabled={isDissecting}
+              disabled={isDissecting || isExplaining}
               className="h-8 text-xs gap-1.5 border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 font-medium"
             >
               {isDissecting ? (
@@ -254,13 +276,14 @@ export function KnowledgeStudyStage({
       {/* Active Tab Body Stage */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
         {/* Streaming Thinking Process Logs when Generating */}
-        {isExplaining && (
+        {(isExplaining || isDissecting) && (
           <AiStreamingRawLogBox
-            step={streamStep || 'Analyzing concept via surgical context...'}
-            thinkingProcess={streamThinking}
+            currentStep={streamStep || (isDissecting ? 'Dissecting into granular subtopics...' : 'Analyzing concept via surgical context...')}
+            thinkingText={streamThinking}
             streamText={streamText}
             modelName={streamModelName}
             isStreaming={true}
+            onStop={onStop}
           />
         )}
 

@@ -329,13 +329,19 @@ body {
 
 /* Clean Medical & Knowledge Map Print Media Styles */
 @media print {
+  *, *::before, *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
   body {
     background: #ffffff !important;
-    color: #000000 !important;
+    color: #111827 !important;
     font-size: 10.5pt;
   }
 
-  header, nav, footer, .print\:hidden, button, [role="dialog"] > div:not(#printable-knowledge-map) {
+  header, nav, footer, .print\:hidden, button, [role="dialog"] [data-radix-dialog-content] > div:not(#printable-knowledge-map) {
     display: none !important;
   }
 
@@ -346,7 +352,21 @@ body {
     padding: 0 !important;
     margin: 0 !important;
     background: #ffffff !important;
-    color: #000000 !important;
+    color: #111827 !important;
+  }
+
+  #printable-knowledge-map * {
+    color: #111827 !important;
+  }
+
+  #printable-knowledge-map p,
+  #printable-knowledge-map li,
+  #printable-knowledge-map span,
+  #printable-knowledge-map h1,
+  #printable-knowledge-map h2,
+  #printable-knowledge-map h3,
+  #printable-knowledge-map h4 {
+    color: #111827 !important;
   }
 
   .card, .Card {
