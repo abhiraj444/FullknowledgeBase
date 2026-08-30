@@ -240,28 +240,36 @@ function KnowledgeMapContent() {
     abortControllerRef.current = new AbortController();
 
     try {
-      // 1. Prepare images if any
-      let processedImages = uploadedFiles;
-      if (uploadedFiles.length > 0 && compressImages) {
-        processedImages = await compressImagesForAi(uploadedFiles);
+      // 1. Prepare images/PDFs if any
+      let imagesForAi: string[] = [];
+      if (uploadedFiles.length > 0) {
+        setStreamStep(`Ingesting & preparing ${uploadedFiles.length} document/image file(s)...`);
+        const prepResult = await prepareImagesForAiPrompt(uploadedFiles, {
+          compressEnabled: compressImages,
+          targetKb: 60,
+          mergeIntoSingle: false,
+        });
+        imagesForAi = prepResult.processedImages || [];
       }
-      const inlineImages = await prepareImagesForAiPrompt(processedImages);
 
-      // 2. Prepare audio transcript context
-      const fullText = [
-        topicInput.trim(),
-        audioTranscripts.length > 0 ? `Voice Memo Notes: ${audioTranscripts.join('\n')}` : '',
-        `Learning Focus Goal: ${learningGoal}`,
-      ]
-        .filter(Boolean)
-        .join('\n\n');
+      // 2. Prepare user prompt context
+      const userTopic = topicInput.trim();
+      const textParts: string[] = [];
+      if (userTopic) {
+        textParts.push(`User Topic / Questions:\n${userTopic}`);
+      }
+      if (audioTranscripts.length > 0) {
+        textParts.push(`Voice Memo Notes:\n${audioTranscripts.join('\n')}`);
+      }
+      textParts.push(`Learning Focus Goal: ${learningGoal}`);
+      const fullText = textParts.join('\n\n');
 
       // 3. Call AI Service
       const mapResult = await ClientSideAiService.generateKnowledgeMap(
         aiConfig,
         {
           text: fullText,
-          images: inlineImages,
+          images: imagesForAi,
           language,
           audienceMode,
           onStreamChunk: (chunk) => {
