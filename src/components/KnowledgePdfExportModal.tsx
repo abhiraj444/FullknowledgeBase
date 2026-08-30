@@ -56,44 +56,109 @@ function escapeHtml(str: string): string {
 }
 
 /**
- * Strips basic markdown markers to clean plain text for PDF generation.
+ * Strips leading numbering or bullet tokens from a node title to prevent double-prefixing.
+ */
+function cleanNodeTitle(rawTitle: string): string {
+  if (!rawTitle) return '';
+  const cleaned = rawTitle
+    .replace(/^(\d+(\.\d+)*[\.:\s-]+)+/i, '')
+    .replace(/^[•\-\*]\s+/, '')
+    .trim();
+  return cleaned || rawTitle.trim();
+}
+
+/**
+ * Strips markdown and formats LaTeX math markers to clean plain text for PDF generation.
  */
 function stripMarkdown(md: string): string {
   if (!md) return '';
   return md
+    .replace(/\\propto\b/g, '∝')
+    .replace(/\\cdot\b/g, '·')
+    .replace(/\\times\b/g, '×')
+    .replace(/\\odot\b/g, '☉')
+    .replace(/\\oplus\b/g, '⊕')
+    .replace(/\\Delta\b/g, 'Δ')
+    .replace(/\\pi\b/g, 'π')
+    .replace(/\\theta\b/g, 'θ')
+    .replace(/\\alpha\b/g, 'α')
+    .replace(/\\beta\b/g, 'β')
+    .replace(/\\mu\b/g, 'μ')
+    .replace(/\\sigma\b/g, 'σ')
+    .replace(/\\approx\b/g, '≈')
+    .replace(/\\neq?\b/g, '≠')
+    .replace(/\\leq?\b/g, '≤')
+    .replace(/\\geq?\b/g, '≥')
+    .replace(/\\pm\b/g, '±')
+    .replace(/\\infty\b/g, '∞')
+    .replace(/\\partial\b/g, '∂')
+    .replace(/\\nabla\b/g, '∇')
+    .replace(/\\sum\b/g, '∑')
+    .replace(/\\int\b/g, '∫')
+    .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
     .replace(/\\text\{([^}]+)\}/g, '$1')
     .replace(/\\mathrm\{([^}]+)\}/g, '$1')
     .replace(/\\mathbf\{([^}]+)\}/g, '$1')
     .replace(/\\textbf\{([^}]+)\}/g, '$1')
-    .replace(/\\ge\b/g, '≥')
-    .replace(/\\le\b/g, '≤')
     .replace(/\\rightarrow\b/g, '→')
     .replace(/\\leftarrow\b/g, '←')
     .replace(/\\degree\b/g, '°')
+    .replace(/\^2\b/g, '²')
+    .replace(/\^3\b/g, '³')
+    .replace(/_\{([^}]+)\}/g, '_$1')
+    .replace(/\^\{([^}]+)\}/g, '^$1')
+    .replace(/\$\$/g, '')
+    .replace(/\$/g, '')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/\*([^*]+)\*/g, '$1')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/^#+\s+/gm, '')
     .replace(/^[-*]\s+/gm, '• ')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
 /**
- * Converts basic markdown formatting to clean semantic HTML for printing.
+ * Converts markdown formatting and LaTeX math to clean semantic HTML for printing.
  */
 function simpleMarkdownToHtml(md: string): string {
   if (!md) return '';
 
   let text = md
+    .replace(/\\propto\b/g, '∝')
+    .replace(/\\cdot\b/g, '·')
+    .replace(/\\times\b/g, '×')
+    .replace(/\\odot\b/g, '☉')
+    .replace(/\\oplus\b/g, '⊕')
+    .replace(/\\Delta\b/g, 'Δ')
+    .replace(/\\pi\b/g, 'π')
+    .replace(/\\theta\b/g, 'θ')
+    .replace(/\\alpha\b/g, 'α')
+    .replace(/\\beta\b/g, 'β')
+    .replace(/\\mu\b/g, 'μ')
+    .replace(/\\sigma\b/g, 'σ')
+    .replace(/\\approx\b/g, '≈')
+    .replace(/\\neq?\b/g, '≠')
+    .replace(/\\leq?\b/g, '≤')
+    .replace(/\\geq?\b/g, '≥')
+    .replace(/\\pm\b/g, '±')
+    .replace(/\\infty\b/g, '∞')
+    .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
     .replace(/\\text\{([^}]+)\}/g, '$1')
     .replace(/\\mathrm\{([^}]+)\}/g, '$1')
     .replace(/\\mathbf\{([^}]+)\}/g, '<strong>$1</strong>')
     .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
-    .replace(/\\ge\b/g, '≥')
-    .replace(/\\le\b/g, '≤')
     .replace(/\\rightarrow\b/g, '→')
     .replace(/\\leftarrow\b/g, '←')
-    .replace(/\\degree\b/g, '°');
+    .replace(/\\degree\b/g, '°')
+    .replace(/\^2\b/g, '²')
+    .replace(/\^3\b/g, '³')
+    .replace(/_\{([^}]+)\}/g, '<sub>$1</sub>')
+    .replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>')
+    .replace(/\$\$/g, '')
+    .replace(/\$/g, '');
 
   const lines = text.split('\n');
   const htmlLines: string[] = [];
@@ -189,6 +254,160 @@ function simpleMarkdownToHtml(md: string): string {
   }
 
   return htmlLines.join('\n');
+}
+
+/**
+ * Robust callout box renderer for jsPDF that handles multi-line text, pagination, and borders without overflowing.
+ */
+interface PdfCardRenderParams {
+  doc: jsPDF;
+  title?: string;
+  lines: string[];
+  margin: number;
+  indent: number;
+  contentWidth: number;
+  bottomLimit: number;
+  fillColor: [number, number, number];
+  borderColor: [number, number, number];
+  titleColor: [number, number, number];
+  textColor: [number, number, number];
+  isItalic?: boolean;
+  fontSize?: number;
+  currentY: number;
+  onPageBreak: () => number;
+}
+
+function renderPdfCard(params: PdfCardRenderParams): number {
+  const {
+    doc,
+    title,
+    lines,
+    margin,
+    indent,
+    contentWidth,
+    bottomLimit,
+    fillColor,
+    borderColor,
+    titleColor,
+    textColor,
+    isItalic = false,
+    fontSize = 7.8,
+    onPageBreak,
+  } = params;
+
+  let y = params.currentY;
+  const cardWidth = contentWidth - indent;
+  const cardX = margin + indent;
+  const textX = cardX + 3.5;
+  const lineHeight = fontSize * 0.46; // in mm
+  const headerHeight = title ? 6.5 : 3;
+  const paddingBottom = 3.5;
+
+  const totalNeededHeight = headerHeight + lines.length * lineHeight + paddingBottom;
+
+  // Case 1: Entire card fits comfortably on current page
+  if (y + totalNeededHeight <= bottomLimit) {
+    doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
+    doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+    doc.roundedRect(cardX, y, cardWidth, totalNeededHeight, 1.5, 1.5, 'FD');
+
+    let textY = y + 4.5;
+    if (title) {
+      doc.setFont('NotoSans', 'bold');
+      doc.setFontSize(fontSize + 0.4);
+      doc.setTextColor(titleColor[0], titleColor[1], titleColor[2]);
+      doc.text(title, textX, textY);
+      textY += 4.5;
+    }
+
+    doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
+    doc.setFontSize(fontSize);
+    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+    for (const line of lines) {
+      doc.text(line, textX, textY);
+      textY += lineHeight;
+    }
+
+    return y + totalNeededHeight + 4.5;
+  }
+
+  // Case 2: Does not fit on current page, but fits on a fresh page
+  const maxPageContentHeight = bottomLimit - (margin + 12);
+  if (totalNeededHeight <= maxPageContentHeight) {
+    y = onPageBreak();
+    doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
+    doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+    doc.roundedRect(cardX, y, cardWidth, totalNeededHeight, 1.5, 1.5, 'FD');
+
+    let textY = y + 4.5;
+    if (title) {
+      doc.setFont('NotoSans', 'bold');
+      doc.setFontSize(fontSize + 0.4);
+      doc.setTextColor(titleColor[0], titleColor[1], titleColor[2]);
+      doc.text(title, textX, textY);
+      textY += 4.5;
+    }
+
+    doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
+    doc.setFontSize(fontSize);
+    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+    for (const line of lines) {
+      doc.text(line, textX, textY);
+      textY += lineHeight;
+    }
+
+    return y + totalNeededHeight + 4.5;
+  }
+
+  // Case 3: Large multi-page block that must be cleanly chunked across pages
+  let remainingLines = [...lines];
+  let isFirstChunk = true;
+
+  while (remainingLines.length > 0) {
+    // If not enough room for even a header + 2 lines, advance page
+    if (bottomLimit - y < 20) {
+      y = onPageBreak();
+    }
+
+    const availableSpace = bottomLimit - y - paddingBottom;
+    const chunkTitle = isFirstChunk ? title : title ? `${title} (Continued)` : undefined;
+    const chunkHeaderH = chunkTitle ? 6.5 : 3;
+    const maxLinesThisPage = Math.max(1, Math.floor((availableSpace - chunkHeaderH) / lineHeight));
+    const linesThisPage = remainingLines.slice(0, maxLinesThisPage);
+    remainingLines = remainingLines.slice(maxLinesThisPage);
+
+    const chunkHeight = chunkHeaderH + linesThisPage.length * lineHeight + paddingBottom;
+
+    doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
+    doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+    doc.roundedRect(cardX, y, cardWidth, chunkHeight, 1.5, 1.5, 'FD');
+
+    let textY = y + 4.5;
+    if (chunkTitle) {
+      doc.setFont('NotoSans', 'bold');
+      doc.setFontSize(fontSize + 0.4);
+      doc.setTextColor(titleColor[0], titleColor[1], titleColor[2]);
+      doc.text(chunkTitle, textX, textY);
+      textY += 4.5;
+    }
+
+    doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
+    doc.setFontSize(fontSize);
+    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+    for (const line of linesThisPage) {
+      doc.text(line, textX, textY);
+      textY += lineHeight;
+    }
+
+    y += chunkHeight + 4.5;
+    isFirstChunk = false;
+
+    if (remainingLines.length > 0) {
+      y = onPageBreak();
+    }
+  }
+
+  return y;
 }
 
 function formatInline(str: string): string {
@@ -301,52 +520,49 @@ export function KnowledgePdfExportModal({
 
       // 2. High-Yield Document Summary
       if (includeSummary && knowledgeMap.documentSummary) {
-        doc.setFont('NotoSans', 'bold');
-        doc.setFontSize(9.5);
-        doc.setTextColor(15, 23, 42);
-
         const summaryRaw = stripMarkdown(knowledgeMap.documentSummary);
         doc.setFont('NotoSans', 'normal');
-        doc.setFontSize(8.5);
+        doc.setFontSize(8.2);
         const summaryLines = doc.splitTextToSize(summaryRaw, contentWidth - 8);
-        const boxHeight = Math.max(summaryLines.length * 4.2 + 10, 16);
 
-        checkPageBreak(boxHeight + 4);
-
-        doc.setFillColor(248, 250, 252);
-        doc.setDrawColor(203, 213, 225);
-        doc.roundedRect(margin, currentY, contentWidth, boxHeight, 2, 2, 'FD');
-
-        doc.setFont('NotoSans', 'bold');
-        doc.setFontSize(9);
-        doc.setTextColor(30, 41, 59);
-        doc.text('HIGH-YIELD SYNTHESIS & CLINICAL THEMES', margin + 4, currentY + 5.5);
-
-        doc.setFont('NotoSans', 'normal');
-        doc.setFontSize(8);
-        doc.setTextColor(51, 65, 85);
-        doc.text(summaryLines, margin + 4, currentY + 10.5);
-
-        currentY += boxHeight + 6;
+        currentY = renderPdfCard({
+          doc,
+          title: 'HIGH-YIELD SYNTHESIS & CLINICAL THEMES',
+          lines: summaryLines,
+          margin,
+          indent: 0,
+          contentWidth,
+          bottomLimit,
+          fillColor: [248, 250, 252],
+          borderColor: [203, 213, 225],
+          titleColor: [30, 41, 59],
+          textColor: [51, 65, 85],
+          fontSize: 8.2,
+          currentY,
+          onPageBreak: () => {
+            checkPageBreak(999);
+            return currentY;
+          },
+        });
       }
 
       // 3. Syllabus Topic Index
       doc.setFont('NotoSans', 'bold');
       doc.setFontSize(10);
       doc.setTextColor(15, 23, 42);
-      checkPageBreak(12);
+      checkPageBreak(14);
       doc.text(`SYLLABUS TOPIC INDEX (${totalExportNodes} Concepts)`, margin, currentY);
       currentY += 4;
       doc.setDrawColor(203, 213, 225);
       doc.line(margin, currentY, pageWidth - margin, currentY);
-      currentY += 4;
+      currentY += 4.5;
 
       targetTree.forEach((root, idx) => {
         checkPageBreak(8);
         doc.setFont('NotoSans', 'bold');
         doc.setFontSize(8.5);
         doc.setTextColor(30, 58, 138);
-        doc.text(`${idx + 1}. ${root.title}`, margin + 2, currentY);
+        doc.text(`${idx + 1}. ${cleanNodeTitle(root.title)}`, margin + 2, currentY);
         currentY += 4.5;
 
         if (root.children && root.children.length > 0) {
@@ -355,7 +571,7 @@ export function KnowledgePdfExportModal({
             doc.setFont('NotoSans', 'normal');
             doc.setFontSize(8);
             doc.setTextColor(71, 85, 105);
-            doc.text(`${idx + 1}.${sIdx + 1} ${sub.title}`, margin + 6, currentY);
+            doc.text(`${idx + 1}.${sIdx + 1} ${cleanNodeTitle(sub.title)}`, margin + 6, currentY);
             currentY += 4;
           });
         }
@@ -364,7 +580,7 @@ export function KnowledgePdfExportModal({
       currentY += 6;
 
       // 4. Detailed Hierarchical Breakdown
-      checkPageBreak(12);
+      checkPageBreak(14);
       doc.setFont('NotoSans', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(15, 23, 42);
@@ -374,23 +590,41 @@ export function KnowledgePdfExportModal({
       doc.line(margin, currentY, pageWidth - margin, currentY);
       currentY += 6;
 
-      const renderPdfNode = (node: KnowledgeTreeNode, prefix: string, indent: number = 0) => {
+      const renderPdfNode = (node: KnowledgeTreeNode, numStr: string, indent: number = 0) => {
         const isRoot = node.depth === 0;
         const isSub = node.depth === 1;
+        const cleanTitle = cleanNodeTitle(node.title);
 
-        // Node Title
-        checkPageBreak(14);
-        doc.setFont('NotoSans', 'bold');
-        doc.setFontSize(isRoot ? 10.5 : isSub ? 9.5 : 8.5);
-        doc.setTextColor(isRoot ? 30 : isSub ? 2 : 71, isRoot ? 58 : isSub ? 132 : 85, isRoot ? 138 : isSub ? 199 : 105);
-
-        let titleStr = `${prefix} ${node.title}`;
+        const titlePrefix = isRoot ? `${numStr}.` : numStr;
+        let titleStr = `${titlePrefix} ${cleanTitle}`;
         if (node.pyqTag) {
           titleStr += `  [${node.pyqTag}]`;
         }
+
+        // Title Spacing and Page Break
+        if (isRoot) {
+          checkPageBreak(22);
+          currentY += 3;
+          doc.setFont('NotoSans', 'bold');
+          doc.setFontSize(10.5);
+          doc.setTextColor(30, 58, 138);
+        } else if (isSub) {
+          checkPageBreak(18);
+          currentY += 2.5;
+          doc.setFont('NotoSans', 'bold');
+          doc.setFontSize(9.5);
+          doc.setTextColor(2, 132, 199);
+        } else {
+          checkPageBreak(14);
+          currentY += 2;
+          doc.setFont('NotoSans', 'bold');
+          doc.setFontSize(8.5);
+          doc.setTextColor(71, 85, 105);
+        }
+
         const titleLines = doc.splitTextToSize(titleStr, contentWidth - indent - 4);
         doc.text(titleLines, margin + indent, currentY);
-        currentY += titleLines.length * (isRoot ? 5 : 4.2) + 1;
+        currentY += titleLines.length * (isRoot ? 5.0 : isSub ? 4.4 : 4.0) + 1.5;
 
         // Node Description
         if (node.description) {
@@ -398,52 +632,64 @@ export function KnowledgePdfExportModal({
           doc.setFontSize(8);
           doc.setTextColor(100, 116, 139);
           const descLines = doc.splitTextToSize(node.description, contentWidth - indent - 4);
-          checkPageBreak(descLines.length * 3.8 + 2);
+          checkPageBreak(descLines.length * 3.8 + 3);
           doc.text(descLines, margin + indent + 2, currentY);
-          currentY += descLines.length * 3.8 + 2;
+          currentY += descLines.length * 3.8 + 3.0;
         }
 
         // First Principle Anchor Callout
         if (node.firstPrincipleAnchor) {
+          const anchorRaw = `First-Principle Anchor: ${stripMarkdown(node.firstPrincipleAnchor)}`;
           doc.setFont('NotoSans', 'normal');
           doc.setFontSize(8);
-          const anchorRaw = `⚡ First-Principle Anchor: ${node.firstPrincipleAnchor}`;
           const anchorLines = doc.splitTextToSize(anchorRaw, contentWidth - indent - 8);
-          const anchorHeight = anchorLines.length * 3.8 + 5;
 
-          checkPageBreak(anchorHeight + 3);
-
-          doc.setFillColor(255, 251, 235); // Light Amber
-          doc.setDrawColor(253, 230, 138);
-          doc.roundedRect(margin + indent, currentY, contentWidth - indent, anchorHeight, 1.5, 1.5, 'FD');
-
-          doc.setTextColor(146, 64, 14);
-          doc.text(anchorLines, margin + indent + 3, currentY + 4);
-          currentY += anchorHeight + 3;
+          currentY = renderPdfCard({
+            doc,
+            lines: anchorLines,
+            margin,
+            indent,
+            contentWidth,
+            bottomLimit,
+            fillColor: [255, 251, 235], // Light Amber
+            borderColor: [253, 230, 138],
+            titleColor: [146, 64, 14],
+            textColor: [146, 64, 14],
+            fontSize: 8,
+            currentY,
+            onPageBreak: () => {
+              checkPageBreak(999);
+              return currentY;
+            },
+          });
         }
 
-        // Standard Explanation
+        // Standard Explanation (Clinical Pathway)
         if (includeExplanations && node.explanation?.standard) {
           const expRaw = stripMarkdown(node.explanation.standard);
           doc.setFont('NotoSans', 'normal');
           doc.setFontSize(7.8);
           const expLines = doc.splitTextToSize(expRaw, contentWidth - indent - 8);
-          const expHeight = expLines.length * 3.6 + 6;
 
-          checkPageBreak(Math.min(expHeight, 40));
-
-          doc.setFillColor(248, 250, 252);
-          doc.setDrawColor(226, 232, 240);
-          doc.roundedRect(margin + indent, currentY, contentWidth - indent, expHeight, 1.5, 1.5, 'FD');
-
-          doc.setFont('NotoSans', 'bold');
-          doc.setTextColor(30, 41, 59);
-          doc.text('📖 Clinical Pathway & Explanation:', margin + indent + 3, currentY + 4);
-
-          doc.setFont('NotoSans', 'normal');
-          doc.setTextColor(51, 65, 85);
-          doc.text(expLines, margin + indent + 3, currentY + 8);
-          currentY += expHeight + 3;
+          currentY = renderPdfCard({
+            doc,
+            title: 'Clinical Pathway & Explanation:',
+            lines: expLines,
+            margin,
+            indent,
+            contentWidth,
+            bottomLimit,
+            fillColor: [248, 250, 252],
+            borderColor: [226, 232, 240],
+            titleColor: [30, 41, 59],
+            textColor: [51, 65, 85],
+            fontSize: 7.8,
+            currentY,
+            onPageBreak: () => {
+              checkPageBreak(999);
+              return currentY;
+            },
+          });
         }
 
         // First-Principles Explanation
@@ -452,22 +698,26 @@ export function KnowledgePdfExportModal({
           doc.setFont('NotoSans', 'normal');
           doc.setFontSize(7.8);
           const fpLines = doc.splitTextToSize(fpRaw, contentWidth - indent - 8);
-          const fpHeight = fpLines.length * 3.6 + 6;
 
-          checkPageBreak(Math.min(fpHeight, 40));
-
-          doc.setFillColor(255, 253, 245);
-          doc.setDrawColor(254, 215, 170);
-          doc.roundedRect(margin + indent, currentY, contentWidth - indent, fpHeight, 1.5, 1.5, 'FD');
-
-          doc.setFont('NotoSans', 'bold');
-          doc.setTextColor(154, 52, 18);
-          doc.text('🔬 First-Principles Derivation:', margin + indent + 3, currentY + 4);
-
-          doc.setFont('NotoSans', 'normal');
-          doc.setTextColor(124, 45, 18);
-          doc.text(fpLines, margin + indent + 3, currentY + 8);
-          currentY += fpHeight + 3;
+          currentY = renderPdfCard({
+            doc,
+            title: 'First-Principles Derivation:',
+            lines: fpLines,
+            margin,
+            indent,
+            contentWidth,
+            bottomLimit,
+            fillColor: [255, 253, 245],
+            borderColor: [254, 215, 170],
+            titleColor: [154, 52, 18],
+            textColor: [124, 45, 18],
+            fontSize: 7.8,
+            currentY,
+            onPageBreak: () => {
+              checkPageBreak(999);
+              return currentY;
+            },
+          });
         }
 
         // User Personal Notes
@@ -476,55 +726,63 @@ export function KnowledgePdfExportModal({
           doc.setFont('NotoSans', 'normal');
           doc.setFontSize(7.8);
           const unLines = doc.splitTextToSize(unRaw, contentWidth - indent - 8);
-          const unHeight = unLines.length * 3.6 + 6;
 
-          checkPageBreak(Math.min(unHeight, 35));
-
-          doc.setFillColor(250, 245, 255);
-          doc.setDrawColor(233, 213, 255);
-          doc.roundedRect(margin + indent, currentY, contentWidth - indent, unHeight, 1.5, 1.5, 'FD');
-
-          doc.setFont('NotoSans', 'bold');
-          doc.setTextColor(107, 33, 168);
-          doc.text('📝 Personal Study Notes:', margin + indent + 3, currentY + 4);
-
-          doc.setFont('NotoSans', 'italic');
-          doc.setTextColor(88, 28, 135);
-          doc.text(unLines, margin + indent + 3, currentY + 8);
-          currentY += unHeight + 3;
+          currentY = renderPdfCard({
+            doc,
+            title: 'Personal Study Notes:',
+            lines: unLines,
+            margin,
+            indent,
+            contentWidth,
+            bottomLimit,
+            fillColor: [250, 245, 255],
+            borderColor: [233, 213, 255],
+            titleColor: [107, 33, 168],
+            textColor: [88, 28, 135],
+            isItalic: true,
+            fontSize: 7.8,
+            currentY,
+            onPageBreak: () => {
+              checkPageBreak(999);
+              return currentY;
+            },
+          });
         }
 
-        // Handwritten Annotation Space (Ruled Lines) - only on subtopics / key concepts
+        // Handwritten Annotation Space (Ruled Lines) - only on subtopics
         if (noteLineCount > 0 && isSub) {
-          const rulingHeight = noteLineCount * 5 + 4;
-          checkPageBreak(rulingHeight + 4);
+          const rulingHeight = noteLineCount * 5.2;
+          const totalBoxHeight = rulingHeight + 10;
+          checkPageBreak(totalBoxHeight + 6);
 
+          currentY += 2;
           doc.setFont('NotoSans', 'bold');
-          doc.setFontSize(7);
+          doc.setFontSize(7.2);
           doc.setTextColor(148, 163, 184);
-          doc.text('✍️ ANNOTATIONS & LECTURE NOTES', margin + indent + 2, currentY + 3);
-          currentY += 4.5;
+          doc.text('ANNOTATIONS & LECTURE NOTES', margin + indent + 2, currentY + 3);
+          currentY += 5.5; // Distinct spacing before box starts
 
           doc.setDrawColor(203, 213, 225);
           if (rulingStyle === 'ruled') {
             for (let l = 0; l < noteLineCount; l++) {
               doc.setLineDashPattern([1.5, 1.5], 0);
               doc.line(margin + indent, currentY, pageWidth - margin, currentY);
-              currentY += 5;
+              currentY += 5.2;
             }
             doc.setLineDashPattern([], 0); // reset
-          } else if (rulingStyle === 'box') {
+          } else if (rulingStyle === 'box' || rulingStyle === 'dotted') {
             doc.setDrawColor(203, 213, 225);
-            doc.roundedRect(margin + indent, currentY, contentWidth - indent, noteLineCount * 5, 1.5, 1.5, 'D');
-            currentY += noteLineCount * 5 + 2;
+            doc.setFillColor(252, 252, 253);
+            doc.roundedRect(margin + indent, currentY, contentWidth - indent, rulingHeight, 1.5, 1.5, 'FD');
+            currentY += rulingHeight;
           }
-          currentY += 2;
+          currentY += 4.5; // Clear spacing after box
         }
 
         // Render Children Recursively
         if (node.children && node.children.length > 0) {
           node.children.forEach((child, cIdx) => {
-            renderPdfNode(child, `${prefix}.${cIdx + 1}`, Math.min(indent + 6, 18));
+            renderPdfNode(child, `${numStr}.${cIdx + 1}`, Math.min(indent + 6, 18));
           });
         }
 
@@ -532,7 +790,7 @@ export function KnowledgePdfExportModal({
       };
 
       targetTree.forEach((root, rIdx) => {
-        renderPdfNode(root, `${rIdx + 1}.`, 0);
+        renderPdfNode(root, `${rIdx + 1}`, 0);
       });
 
       // 5. Add Page Numbers
@@ -575,13 +833,15 @@ export function KnowledgePdfExportModal({
    * Generates the self-contained, standalone printable HTML document.
    */
   const printableHtml = useMemo(() => {
-    const renderNodeHtml = (node: KnowledgeTreeNode, prefix: string): string => {
+    const renderNodeHtml = (node: KnowledgeTreeNode, numStr: string): string => {
       const hasExplanation = Boolean(node.explanation?.standard);
       const hasFirstPrinciples = Boolean(node.explanation?.firstPrinciples);
       const hasUserNotes = Boolean(node.explanation?.userNotes);
 
       const isRoot = node.depth === 0;
       const isLevel1 = node.depth === 1;
+      const cleanTitle = cleanNodeTitle(node.title);
+      const prefix = isRoot ? `${numStr}.` : numStr;
 
       let rulingHtml = '';
       if (noteLineCount > 0 && isLevel1) {
@@ -590,22 +850,22 @@ export function KnowledgePdfExportModal({
             .map(() => '<div style="height: 20px; border-bottom: 1px dashed #cbd5e1;"></div>')
             .join('');
           rulingHtml = `
-            <div style="margin-top: 6px; page-break-inside: avoid; break-inside: avoid;">
-              <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 2px;">✍️ Student Notes &amp; Formula Space</div>
+            <div style="margin-top: 8px; margin-bottom: 4px; page-break-inside: avoid; break-inside: avoid;">
+              <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 4px;">✍️ Student Notes &amp; Formula Space</div>
               ${lines}
             </div>
           `;
         } else if (rulingStyle === 'dotted') {
           rulingHtml = `
-            <div style="margin-top: 6px; page-break-inside: avoid; break-inside: avoid;">
-              <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 2px;">✍️ Scratchpad &amp; Grid</div>
+            <div style="margin-top: 8px; margin-bottom: 4px; page-break-inside: avoid; break-inside: avoid;">
+              <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 4px;">✍️ Scratchpad &amp; Grid</div>
               <div style="height: ${Math.max(noteLineCount * 16, 40)}px; border: 1px solid #cbd5e1; border-radius: 4px; background-image: radial-gradient(circle, #94a3b8 1px, transparent 1px); background-size: 12px 12px;"></div>
             </div>
           `;
         } else if (rulingStyle === 'box') {
           rulingHtml = `
-            <div style="margin-top: 6px; page-break-inside: avoid; break-inside: avoid;">
-              <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 2px;">✍️ Sketched Diagram Frame</div>
+            <div style="margin-top: 8px; margin-bottom: 4px; page-break-inside: avoid; break-inside: avoid;">
+              <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 4px;">✍️ Sketched Diagram Frame</div>
               <div style="height: ${Math.max(noteLineCount * 16, 40)}px; border: 1px dashed #94a3b8; border-radius: 4px; background: #fafafa;"></div>
             </div>
           `;
@@ -615,7 +875,7 @@ export function KnowledgePdfExportModal({
       let childrenHtml = '';
       if (node.children && node.children.length > 0) {
         childrenHtml = node.children
-          .map((child, idx) => renderNodeHtml(child, `${prefix}.${idx + 1}`))
+          .map((child, idx) => renderNodeHtml(child, `${numStr}.${idx + 1}`))
           .join('\n');
       }
 
@@ -630,19 +890,19 @@ export function KnowledgePdfExportModal({
       const headingFontWeight = isRoot ? '800' : isLevel1 ? '700' : '600';
 
       return `
-        <div style="border-left: 3px solid ${borderLeftColor}; padding-left: 12px; margin-bottom: 12px; margin-top: ${
-        isRoot ? '16px' : '6px'
+        <div style="border-left: 3px solid ${borderLeftColor}; padding-left: 12px; margin-bottom: 14px; margin-top: ${
+        isRoot ? '18px' : '8px'
       };">
           <div style="page-break-inside: avoid; break-inside: avoid;">
             <div style="font-size: ${headingFontSize}; font-weight: ${headingFontWeight}; color: #0f172a; line-height: 1.3;">
               <span style="font-family: monospace; color: #64748b; margin-right: 4px;">${prefix}</span>
-              <span>${escapeHtml(node.title)}</span>
+              <span>${escapeHtml(cleanTitle)}</span>
               ${tagHtml}
             </div>
 
             ${
               node.description
-                ? `<p style="font-size: 9pt; color: #475569; font-style: italic; margin: 3px 0 5px 0; line-height: 1.35;">${escapeHtml(
+                ? `<p style="font-size: 9pt; color: #475569; font-style: italic; margin: 4px 0 6px 0; line-height: 1.35;">${escapeHtml(
                     node.description
                   )}</p>`
                 : ''
@@ -651,9 +911,9 @@ export function KnowledgePdfExportModal({
             ${
               node.firstPrincipleAnchor
                 ? `
-              <div style="background: #fffbeb; border: 1px solid #fef3c7; border-left: 3px solid #d97706; border-radius: 4px; padding: 5px 8px; margin: 4px 0; font-size: 8.5pt; color: #78350f;">
+              <div style="background: #fffbeb; border: 1px solid #fef3c7; border-left: 3px solid #d97706; border-radius: 4px; padding: 6px 10px; margin: 6px 0; font-size: 8.5pt; color: #78350f;">
                 <strong style="color: #92400e;">⚡ First-Principle Anchor:</strong> ${escapeHtml(
-                  node.firstPrincipleAnchor
+                  stripMarkdown(node.firstPrincipleAnchor)
                 )}
               </div>
             `
@@ -663,8 +923,8 @@ export function KnowledgePdfExportModal({
             ${
               includeExplanations && hasExplanation
                 ? `
-              <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px 8px; margin: 4px 0;">
-                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #475569; margin-bottom: 3px;">📖 Standard Explanation &amp; Clinical Pathway:</div>
+              <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px 10px; margin: 6px 0;">
+                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #475569; margin-bottom: 4px;">📖 Standard Explanation &amp; Clinical Pathway:</div>
                 ${simpleMarkdownToHtml(node.explanation!.standard!)}
               </div>
             `
@@ -674,8 +934,8 @@ export function KnowledgePdfExportModal({
             ${
               includeFirstPrinciples && hasFirstPrinciples
                 ? `
-              <div style="background: #fffdf5; border: 1px solid #fed7aa; border-left: 3px solid #f97316; border-radius: 4px; padding: 6px 8px; margin: 4px 0;">
-                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #9a3412; margin-bottom: 3px;">🔬 First-Principles Derivation:</div>
+              <div style="background: #fffdf5; border: 1px solid #fed7aa; border-left: 3px solid #f97316; border-radius: 4px; padding: 8px 10px; margin: 6px 0;">
+                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #9a3412; margin-bottom: 4px;">🔬 First-Principles Derivation:</div>
                 ${simpleMarkdownToHtml(node.explanation!.firstPrinciples!)}
               </div>
             `
@@ -685,8 +945,8 @@ export function KnowledgePdfExportModal({
             ${
               includeUserNotes && hasUserNotes
                 ? `
-              <div style="background: #faf5ff; border: 1px solid #e9d5ff; border-left: 3px solid #9333ea; border-radius: 4px; padding: 5px 8px; margin: 4px 0;">
-                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #6b21a8; margin-bottom: 2px;">📝 Digital Notes:</div>
+              <div style="background: #faf5ff; border: 1px solid #e9d5ff; border-left: 3px solid #9333ea; border-radius: 4px; padding: 6px 10px; margin: 6px 0;">
+                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #6b21a8; margin-bottom: 3px;">📝 Digital Notes:</div>
                 <div style="font-size: 8.5pt; color: #581c87; font-family: Georgia, serif;">${escapeHtml(
                   node.explanation!.userNotes!
                 )}</div>
@@ -700,7 +960,7 @@ export function KnowledgePdfExportModal({
 
           ${
             childrenHtml
-              ? `<div style="padding-left: 6px; margin-top: 4px;">${childrenHtml}</div>`
+              ? `<div style="padding-left: 6px; margin-top: 6px;">${childrenHtml}</div>`
               : ''
           }
         </div>
@@ -708,7 +968,7 @@ export function KnowledgePdfExportModal({
     };
 
     const treeContentHtml = targetTree
-      .map((node, index) => renderNodeHtml(node, `${index + 1}.`))
+      .map((node, index) => renderNodeHtml(node, `${index + 1}`))
       .join('\n');
 
     const syllabusHtml = targetTree
@@ -724,13 +984,13 @@ export function KnowledgePdfExportModal({
                     (leaf, k) =>
                       `<div style="padding-left: 16px; font-size: 8.5pt; color: #64748b;">${i + 1}.${
                         j + 1
-                      }.${k + 1} ${escapeHtml(leaf.title)}</div>`
+                      }.${k + 1} ${escapeHtml(cleanNodeTitle(leaf.title))}</div>`
                   )
                   .join('');
               }
               return `
                 <div style="padding-left: 14px; font-size: 9pt; color: #334155; margin-top: 2px;">
-                  ${i + 1}.${j + 1} ${escapeHtml(sub.title)}
+                  <span style="font-weight: 600;">${i + 1}.${j + 1}</span> ${escapeHtml(cleanNodeTitle(sub.title))}
                   ${leafItems}
                 </div>
               `;
@@ -740,7 +1000,7 @@ export function KnowledgePdfExportModal({
         return `
           <div style="margin-bottom: 6px;">
             <div style="font-weight: 700; font-size: 9.5pt; color: #0f172a;">${i + 1}. ${escapeHtml(
-          root.title
+          cleanNodeTitle(root.title)
         )}</div>
             ${subItems}
           </div>
