@@ -285,8 +285,9 @@ function KnowledgeMapContent() {
       setIsInputExpanded(false);
 
       // 4. Save to Dexie Local Database
+      const caseId = currentCaseId || crypto.randomUUID();
       const newCase: LocalCase = {
-        id: currentCaseId || crypto.randomUUID(),
+        id: caseId,
         userId: user?.id || 'local-user',
         title: mapResult.title || topicInput.slice(0, 60) || 'Knowledge Map Case',
         type: 'knowledge-map',
@@ -298,12 +299,12 @@ function KnowledgeMapContent() {
           knowledgeMap: mapResult,
           totalNodesCount: countTotalNodes(mapResult.tree),
         },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
       };
 
       await LocalDataService.saveCase(newCase);
-      setCurrentCaseId(newCase.id);
+      setCurrentCaseId(caseId);
 
       toast({
         title: 'Knowledge Map Generated!',
@@ -523,14 +524,25 @@ function KnowledgeMapContent() {
 
   // Helper to persist updated map into Dexie DB
   const saveMapToDatabase = async (mapToSave: KnowledgeMapData) => {
-    if (!currentCaseId) return;
     try {
-      await LocalDataService.updateCase(currentCaseId, {
+      const caseId = currentCaseId || crypto.randomUUID();
+      if (!currentCaseId) {
+        setCurrentCaseId(caseId);
+      }
+      await LocalDataService.updateCase(caseId, {
+        id: caseId,
+        userId: user?.id || 'local-user',
+        title: mapToSave.title || topicInput.slice(0, 60) || 'Knowledge Map Case',
+        type: 'knowledge-map',
+        inputData: {
+          topic: topicInput,
+          learningGoal,
+        },
         outputData: {
           knowledgeMap: mapToSave,
           totalNodesCount: countTotalNodes(mapToSave.tree),
         },
-        updatedAt: new Date().toISOString(),
+        updatedAt: Date.now(),
       });
     } catch (err) {
       console.error('Failed to auto-save knowledge map:', err);

@@ -84,7 +84,18 @@ function normalizeBiomedicalNotation(raw: string): string {
   // 3. Convert standard LaTeX inline math \( ... \) into $ ... $
   text = text.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$');
 
-  // 4. Support common clinical/biomedical arrows and degree shorthand outside math
+  // 4. Convert bracketed math formulas [ ... ] that contain LaTeX commands (like \frac, \text, \approx, etc.) into $$ ... $$
+  text = text.replace(/\[\s*([^[\]\n]*(?:\\frac|\\text|\\approx|\\times|\\cdot|\\Delta|\\sum|\\int|\\sqrt|\\alpha|\\beta|\\mu|\\sigma|\\omega|\\Omega|\\pm|\\partial|\\leq|\\geq|\\neq|\\propto|\\to|\\rightarrow|\\theta|\\pi|\\lambda|_|\^)[^[\]\n]*)\s*\]/g, '\n\n$$ $1 $$\n\n');
+
+  // 5. Convert standalone lines that look like raw LaTeX equations without $$ (e.g. \frac{...}{...} or T_{...} = \frac...)
+  text = text.replace(/^(\s*)([a-zA-Z0-9_\^\\{}()+\-=*\/,\. ]*(?:\\frac|\\sqrt|\\sum|\\int|\\approx|\\propto)[a-zA-Z0-9_\^\\{}()+\-=*\/,\. ]*)(\s*)$/gm, (match, p1, p2, p3) => {
+    const trimmed = p2.trim();
+    if (trimmed.startsWith('$') && trimmed.endsWith('$')) return match;
+    if (trimmed.startsWith('```')) return match;
+    return `${p1}\n\n$$ ${trimmed} $$\n\n${p3}`;
+  });
+
+  // 6. Support common clinical/biomedical arrows and degree shorthand outside math
   text = text
     .replace(/\\uparrow\b/g, '↑')
     .replace(/\\downarrow\b/g, '↓')

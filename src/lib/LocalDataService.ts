@@ -9,6 +9,7 @@ export interface LocalCase {
   type: 'diagnosis' | 'content-generator' | 'knowledge-map';
   title: string;
   createdAt: number;
+  updatedAt?: number;
   inputData: {
     patientData?: string | null;
     supportingDocuments?: string[]; // Local URLs or Base64
@@ -20,6 +21,8 @@ export interface LocalCase {
     topicOrQuestion?: string | null;
     sourceType?: 'pdf' | 'pyq' | 'text' | 'image';
     fromDiagnosisCaseId?: string;
+    learningGoal?: string;
+    [key: string]: any;
   };
   outputDataUrl?: string; // Local path to JSON
   outputData?: any; // Direct storage for simplicity in local mode
@@ -62,6 +65,21 @@ export const LocalDataService = {
 
   async getCase(id: string) {
     return await db.cases.get(id);
+  },
+
+  async updateCase(id: string, updates: Partial<LocalCase>) {
+    const existing = await db.cases.get(id);
+    if (!existing) {
+      return await this.saveCase({ ...updates, id });
+    }
+    const merged = {
+      ...existing,
+      ...updates,
+      id,
+      updatedAt: updates.updatedAt || Date.now(),
+    };
+    await db.cases.put(merged as LocalCase);
+    return id;
   },
 
   async getUserCases(userId: string) {

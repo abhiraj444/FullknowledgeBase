@@ -2407,6 +2407,7 @@ ${modeInstructions}
 **Formatting Guidelines:**
 - Format in rich, clean GitHub-flavored Markdown.
 - Use bolding, clear sub-headings (###), bullet points, callout blockquotes (>), and comparison tables.
+- For all mathematical, physical, or biochemical equations, use standard LaTeX math syntax: enclose display equations in $$ ... $$ and inline formulas in $ ... $ (e.g. $$ T_{\\text{lunar}} = \\frac{24}{1 - \\dots} \\approx 24\\text{ h } 50\\text{ m} $$). Never leave raw unrendered formulas or wrap formulas in plain square brackets [...].
 - Write in ${language.toUpperCase()}.
 
 Produce the complete Markdown explanation directly without meta-commentary.`;
