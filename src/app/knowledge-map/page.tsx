@@ -591,6 +591,59 @@ function KnowledgeMapContent() {
   const totalNodesCount = knowledgeMap ? countTotalNodes(knowledgeMap.tree) : 0;
   const totalExploredCount = knowledgeMap ? countExploredNodes(knowledgeMap.tree) : 0;
 
+  // Seamless Bridge to Slide Studio with current knowledge map
+  const handleBuildSlidesFromMap = async () => {
+    if (!knowledgeMap) {
+      toast({
+        title: 'No Knowledge Tree',
+        description: 'Please generate or load a knowledge map before building slides.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    let caseId = currentCaseIdRef.current || currentCaseId;
+    if (!caseId) {
+      caseId = crypto.randomUUID();
+      currentCaseIdRef.current = caseId;
+      setCurrentCaseId(caseId);
+    }
+
+    // Persist full tree to local database
+    const mapCase: LocalCase = {
+      id: caseId,
+      userId: user?.id || 'local-user',
+      title: knowledgeMap.title || topicInput || 'Knowledge Map Case',
+      type: 'knowledge-map',
+      inputData: {
+        topic: topicInput,
+        learningGoal,
+      },
+      outputData: {
+        knowledgeMap: knowledgeMap,
+        totalNodesCount: countTotalNodes(knowledgeMap.tree),
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    try {
+      await LocalDataService.saveCase(mapCase);
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('medigen_bridge_knowledge_map', JSON.stringify({ caseId, knowledgeMap }));
+      }
+    } catch (e) {
+      console.warn('Failed saving before bridge:', e);
+    }
+
+    toast({
+      title: 'Bridging to Slide Studio',
+      description: `Transforming "${knowledgeMap.title}" into teaching slides...`,
+    });
+
+    router.push(`/content-generator?fromCaseId=${caseId}`);
+  };
+
   return (
     <div className="container mx-auto max-w-7xl px-3 sm:px-4 py-4 sm:py-6 space-y-6">
       {/* Page Header */}
@@ -640,16 +693,14 @@ function KnowledgeMapContent() {
 
               {/* Bridge to Slide Deck Studio */}
               <Button
-                asChild
                 variant="outline"
                 size="sm"
-                className="text-xs gap-1.5"
+                className="text-xs gap-1.5 font-semibold text-primary hover:bg-primary/10 border-primary/30"
                 title="Convert Knowledge Map into Teaching Presentation Slides"
+                onClick={handleBuildSlidesFromMap}
               >
-                <Link href={`/content-generator?fromCaseId=${currentCaseId || ''}`}>
-                  <Presentation className="h-3.5 w-3.5 text-primary" />
-                  <span className="hidden sm:inline">Build</span> Slides
-                </Link>
+                <Presentation className="h-3.5 w-3.5 text-primary" />
+                <span className="hidden sm:inline">Build</span> Slides
               </Button>
             </>
           )}

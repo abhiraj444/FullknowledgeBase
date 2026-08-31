@@ -52,6 +52,7 @@ import { useSettings } from '@/context/SettingsContext';
 import { useToast } from '@/hooks/use-toast';
 import { isPdfFile, convertPdfToImages } from '@/lib/pdf-to-images';
 import { prepareImagesForAiPrompt } from '@/lib/image-compressor';
+import ClinicalMarkdownRenderer from '@/components/ClinicalMarkdownRenderer';
 
 interface BoldRendererProps {
   text: string;
@@ -793,17 +794,31 @@ export const EnhancedSlideRenderer: React.FC<EnhancedSlideRendererProps> = ({
                 </div>
 
                 {slideAnswers.map((item, i) => (
-                  <div key={i} className="rounded-lg bg-card p-3 space-y-2 border border-border shadow-2xs">
-                    <p className="font-bold text-foreground">Q: {item.q}</p>
-                    <div className="text-muted-foreground text-xs leading-relaxed border-l-2 border-primary pl-2.5">
-                      {item.a}
+                  <div key={i} className="rounded-lg bg-card p-3.5 space-y-2.5 border border-border shadow-2xs">
+                    <p className="font-bold text-foreground flex items-start gap-1.5 text-xs sm:text-sm">
+                      <span className="text-primary font-mono font-bold shrink-0">Q:</span>
+                      <span>{item.q}</span>
+                    </p>
+                    <div className="text-foreground text-xs leading-relaxed border-l-2 border-primary/70 pl-3">
+                      <ClinicalMarkdownRenderer content={item.a} />
                     </div>
+                    {item.reasoning && (
+                      <details className="mt-2 text-xs text-muted-foreground bg-muted/40 p-2.5 rounded-md border border-border/50 group">
+                        <summary className="cursor-pointer font-semibold text-primary/80 hover:text-primary list-none flex items-center gap-1.5 select-none">
+                          <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+                          <span>Underlying Teaching Rationale &amp; Clinical Pearls</span>
+                        </summary>
+                        <div className="pt-2 pl-1 leading-relaxed text-foreground/90 border-t border-border/40 mt-1.5">
+                          <ClinicalMarkdownRenderer content={item.reasoning} />
+                        </div>
+                      </details>
+                    )}
                   </div>
                 ))}
 
                 {/* Active Streaming or Loading State */}
                 {isAskingSlide && (
-                  <div className="rounded-lg bg-card/80 p-3 space-y-2 border border-primary/40 shadow-2xs animate-in fade-in">
+                  <div className="rounded-lg bg-card/80 p-3.5 space-y-2.5 border border-primary/40 shadow-2xs animate-in fade-in">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 text-primary text-xs font-semibold">
                         <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
@@ -830,8 +845,8 @@ export const EnhancedSlideRenderer: React.FC<EnhancedSlideRendererProps> = ({
                     )}
 
                     {streamLiveAnswer && (
-                      <div className="text-foreground text-xs leading-relaxed border-l-2 border-primary pl-2.5 whitespace-pre-wrap">
-                        {streamLiveAnswer}
+                      <div className="text-foreground text-xs leading-relaxed border-l-2 border-primary/70 pl-3">
+                        <ClinicalMarkdownRenderer content={streamLiveAnswer} />
                       </div>
                     )}
                   </div>

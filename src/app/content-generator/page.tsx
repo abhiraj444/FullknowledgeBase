@@ -200,19 +200,128 @@ function ContentGeneratorContent() {
       // Guard against multiple bridge executions
       processedFromCaseRef.current = fromCaseId;
 
-      const bridgeFromDiagnosis = async () => {
+      const bridgeFromSource = async () => {
         setIsLoading(true);
         setErrorMessage(null);
         setStreamThinking('');
         setStreamText('');
-        setStreamStep('Generating presentation outline from clinical diagnosis...');
+        setStreamStep('Retrieving case data to generate presentation outline...');
         setActiveStepIndex(0);
 
         try {
-          const diagCase = await LocalDataService.getCase(fromCaseId);
-          if (diagCase) {
-            const diagSummary = diagCase.outputData?.caseSummaryForPresentation || diagCase.title || 'Clinical Case Presentation';
-            const diagTopic = diagCase.title || 'Clinical Case Study';
+          let targetCase = await LocalDataService.getCase(fromCaseId);
+          let cachedKnowledgeMap: any = null;
+
+          if (!targetCase && typeof window !== 'undefined') {
+            try {
+              const raw = sessionStorage.getItem('medigen_bridge_knowledge_map');
+              if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed.caseId === fromCaseId || parsed.knowledgeMap) {
+                  cachedKnowledgeMap = parsed.knowledgeMap;
+                }
+              }
+            } catch (err) {
+              console.warn('Could not read cached knowledge map:', err);
+            }
+          }
+
+          const isKnowledgeMapCase = targetCase?.type === 'knowledge-map' || Boolean(targetCase?.outputData?.knowledgeMap) || Boolean(cachedKnowledgeMap);
+          const knowledgeMapObj = targetCase?.outputData?.knowledgeMap || cachedKnowledgeMap;
+
+          if (isKnowledgeMapCase && knowledgeMapObj) {
+            const mapTitle = knowledgeMapObj.title || targetCase?.title || 'Knowledge Presentation';
+            const mapSummary = knowledgeMapObj.documentSummary || targetCase?.inputData?.topic || mapTitle;
+            setTopic(mapTitle);
+            setQuestion(mapSummary);
+            setMode('topic');
+            setResult({
+              topic: mapTitle,
+              answer: `Teaching presentation generated directly from Knowledge Map: "${mapTitle}".`,
+            });
+            setStreamStep('Generating slide outline and synthesizing structured slides from Knowledge Tree...');
+
+            const bridgeResult = await ClientSideAiService.generatePresentationFromKnowledgeMap(
+              aiConfig,
+              knowledgeMapObj,
+              {
+                language,
+                audienceMode,
+                onOutlineReady: (outline) => {
+                  setPresentationOutline(outline);
+                  setSelectedTopics(outline);
+                  setSuggestedTopics(outline);
+                  const placeholders = outline.map((t) => ({ title: t, content: [] }));
+                  setSlides(placeholders);
+                  setStreamStep('Synthesizing structured multi-slide presentation in real-time...');
+                  setActiveStepIndex(1);
+                },
+                onStreamChunk: (payload) => {
+                  if (payload.thinking) setStreamThinking(payload.thinking);
+                  if (payload.model) setStreamModelName(formatModelDisplayName(payload.model));
+                  if (payload.step) setStreamStep(payload.step);
+                  if (payload.text) {
+                    setStreamText(payload.text);
+                    const progressiveSlides = extractProgressiveSlides(payload.text);
+                    if (progressiveSlides.length > 0) {
+                      setSlides((prev: Slide[] | null) => {
+                        if (!prev || prev.length === 0) return progressiveSlides;
+                        const next = [...prev];
+                        for (let i = 0; i < progressiveSlides.length; i++) {
+                          if (i < next.length) {
+                            next[i] = progressiveSlides[i];
+                          } else {
+                            next.push(progressiveSlides[i]);
+                          }
+                        }
+                        return next;
+                      });
+                    }
+                  }
+                },
+              }
+            );
+
+            setPresentationOutline(bridgeResult.outline);
+            setSelectedTopics(bridgeResult.outline);
+            setSlides(bridgeResult.slides);
+            setUsedTopics(bridgeResult.slides.map((s) => s.title));
+            setSuggestedTopics(bridgeResult.outline);
+            setResult({
+              topic: mapTitle,
+              answer: `Teaching presentation generated directly from Knowledge Map: "${mapTitle}".`,
+            });
+
+            // Save new presentation case
+            const newCaseData: Partial<LocalCase> = {
+              userId: user.id,
+              type: 'content-generator',
+              title: `Presentation: ${mapTitle}`,
+              inputData: {
+                mode: 'topic',
+                topic: mapTitle,
+                fromDiagnosisCaseId: fromCaseId,
+              },
+              outputData: {
+                result: { topic: mapTitle, answer: `Presentation synthesized from Knowledge Tree (${bridgeResult.slides.length} slides).` },
+                slides: bridgeResult.slides,
+                outline: bridgeResult.outline,
+                selectedTopics: bridgeResult.outline,
+                usedTopics: bridgeResult.slides.map((s) => s.title),
+                suggestedTopics: bridgeResult.outline,
+                followUpThreads: [],
+              },
+            };
+
+            const savedId = await LocalDataService.saveCase(newCaseData);
+            setCurrentCaseId(savedId);
+            loadedCaseIdRef.current = savedId;
+            router.replace(`/content-generator?caseId=${savedId}`);
+            toast({ title: 'Presentation Ready', description: `Generated ${bridgeResult.slides.length} slides from Knowledge Map.` });
+          } else if (targetCase) {
+            // Diagnosis case bridge
+            const diagSummary = targetCase.outputData?.caseSummaryForPresentation || targetCase.title || 'Clinical Case Presentation';
+            const diagTopic = targetCase.title || 'Clinical Case Study';
             setTopic(diagTopic);
             setQuestion(diagSummary);
             setMode('topic');
@@ -226,7 +335,7 @@ function ContentGeneratorContent() {
               aiConfig,
               diagSummary,
               diagTopic,
-              diagCase.outputData?.clinicalAnswer?.answer,
+              targetCase.outputData?.clinicalAnswer?.answer,
               {
                 language,
                 audienceMode,
@@ -302,9 +411,15 @@ function ContentGeneratorContent() {
             // Clean URL query param so re-renders don't trigger the bridge again
             router.replace(`/content-generator?caseId=${savedId}`);
             toast({ title: 'Presentation Ready', description: 'Generated slide deck from diagnosis summary.' });
+          } else {
+            toast({
+              title: 'Case Not Found',
+              description: 'Could not find the referenced case data to construct slides. Please select or generate a case.',
+              variant: 'destructive',
+            });
           }
         } catch (e: any) {
-          console.error('Failed to bridge from diagnosis:', e);
+          console.error('Failed to bridge presentation:', e);
           const msg = e?.message || 'Failed to generate presentation from case.';
           setErrorMessage(msg);
           toast({ title: 'Bridge Error', description: msg, variant: 'destructive' });
@@ -312,7 +427,7 @@ function ContentGeneratorContent() {
           setIsLoading(false);
         }
       };
-      bridgeFromDiagnosis();
+      bridgeFromSource();
     } else if (topicParam && !topic && !fromCaseId && !caseId) {
       setTopic(topicParam);
       setMode('topic');

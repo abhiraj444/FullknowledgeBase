@@ -1532,7 +1532,8 @@ ${params.slideSummary ? `**Slide Summary:** ${params.slideSummary}` : ''}
 **Instructions:**
 1. Provide a clear, engaging answer specific to this slide's domain in the chosen language and audience style. If images/documents are attached, analyze them in this context.
 2. If in Simplified mode, explain the core concept from first principles with vivid analogies. If in Doctor/Advanced mode, connect concepts to high-level theory, practical applications, and exam pearls.
-3. Output strictly in Markdown:
+3. When outputting comparison tables or criteria, use standard GitHub-Flavored Markdown tables with each row on its own distinct line and empty lines before and after the table.
+4. Output strictly in Markdown:
 
 ## Answer
 [Detailed answer explaining the concept with clear markdown formatting]
@@ -2005,6 +2006,99 @@ For EACH topic in the list above, output one complete slide using this structure
 
         return {
             outline: outlineData.outline,
+            slides: slides,
+        };
+    },
+
+    /**
+     * Token-Efficient Bridge: Generate Slide Deck directly from Structured Knowledge Map
+     */
+    async generatePresentationFromKnowledgeMap(
+        apiKeyOrConfig: string | AiConfig,
+        knowledgeMap: {
+            title: string;
+            documentSummary: string;
+            tree: KnowledgeTreeNode[];
+            learningGoal?: string;
+        },
+        options?: {
+            language?: TargetLanguage;
+            audienceMode?: AudienceMode;
+            onStreamChunk?: (payload: StreamChunkCallbackPayload) => void;
+            onOutlineReady?: (outline: string[]) => void;
+            signal?: AbortSignal;
+        }
+    ): Promise<{ outline: string[]; slides: Slide[] }> {
+        const language = options?.language || 'english';
+        const audienceMode = options?.audienceMode || 'doctor';
+        const topic = knowledgeMap.title || 'Knowledge Presentation';
+
+        // Flatten knowledge map tree into structured topics and concept mechanisms
+        const treeTopics: string[] = [];
+        const treeContextItems: string[] = [];
+
+        const traverseTree = (nodes: KnowledgeTreeNode[]) => {
+            for (const n of nodes) {
+                if (n.title && !treeTopics.includes(n.title)) {
+                    treeTopics.push(n.title);
+                    let itemDesc = `- Concept: "${n.title}"`;
+                    if (n.firstPrincipleAnchor) itemDesc += ` (First Principle: ${n.firstPrincipleAnchor})`;
+                    if (n.pyqTag) itemDesc += ` [Tag: ${n.pyqTag}]`;
+                    if (n.description) itemDesc += ` - ${n.description}`;
+                    if (n.keyTakeaway) itemDesc += ` (Takeaway: ${n.keyTakeaway})`;
+                    treeContextItems.push(itemDesc);
+                }
+                if (n.children && n.children.length > 0) {
+                    traverseTree(n.children);
+                }
+            }
+        };
+        traverseTree(knowledgeMap.tree || []);
+
+        let outline: string[] = [];
+        // If tree already has between 3 and 10 clean topic nodes, we can use them directly
+        if (treeTopics.length >= 3 && treeTopics.length <= 10) {
+            outline = treeTopics;
+        } else if (treeTopics.length > 10) {
+            outline = treeTopics.slice(0, 10);
+        } else {
+            // Generate full outline using the rich tree context
+            const outlineData = await this.generatePresentationOutline(apiKeyOrConfig, {
+                topic: topic,
+                question: knowledgeMap.documentSummary || topic,
+                answer: treeContextItems.join('\n'),
+                language: language,
+                audienceMode: audienceMode,
+                onStreamChunk: options?.onStreamChunk,
+                signal: options?.signal,
+            });
+            outline = outlineData.outline;
+        }
+
+        const selectedTopics = outline.slice(0, 10);
+        if (options?.onOutlineReady) {
+            options.onOutlineReady(selectedTopics);
+        }
+
+        const richContext = [
+            `Document Summary: ${knowledgeMap.documentSummary || ''}`,
+            knowledgeMap.learningGoal ? `Learning Goal: ${knowledgeMap.learningGoal}` : '',
+            `Structured Knowledge Tree Concepts & First-Principles:\n${treeContextItems.slice(0, 20).join('\n')}`,
+        ].filter(Boolean).join('\n\n');
+
+        const slides = await this.generateSlideContent(apiKeyOrConfig, {
+            topic: topic,
+            selectedTopics: selectedTopics,
+            caseSummaryForPresentation: richContext,
+            fullAnswer: treeContextItems.slice(0, 15).join('\n'),
+            language: language,
+            audienceMode: audienceMode,
+            onStreamChunk: options?.onStreamChunk,
+            signal: options?.signal,
+        });
+
+        return {
+            outline: selectedTopics,
             slides: slides,
         };
     },
