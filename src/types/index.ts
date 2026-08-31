@@ -181,6 +181,9 @@ export interface KnowledgeTreeNode {
     explanation?: KnowledgeNodeExplanation;
     isExpanded?: boolean;
     isCustomAdded?: boolean;
+    isNewlyDissected?: boolean;
+    isNew?: boolean;
+    dissectedAt?: number;
 }
 
 export interface KnowledgeMapData {

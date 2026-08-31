@@ -64,22 +64,22 @@ export default function Header() {
       {/* Top subtle decorative ruler bar */}
       <div className="h-1 w-full bg-gradient-to-r from-primary/30 via-amber-400/40 to-emerald-500/30" />
 
-      <div className="container mx-auto flex h-16 max-w-7xl items-center justify-between px-3 sm:px-6">
+      <div className="container mx-auto flex h-16 max-w-7xl items-center justify-between px-2.5 sm:px-6 gap-1 sm:gap-4 overflow-hidden sm:overflow-visible">
         {/* Brand with Journal Callout */}
-        <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary group-hover:scale-105 transition-transform shadow-2xs">
-            <Stethoscope className="h-5 w-5 sm:h-6 sm:w-6" />
+        <Link href="/" className="flex items-center gap-1.5 sm:gap-2.5 group shrink-0 min-w-0">
+          <div className="p-1.5 sm:p-2 rounded-xl bg-primary/10 border border-primary/20 text-primary group-hover:scale-105 transition-transform shadow-2xs shrink-0">
+            <Stethoscope className="h-4 w-4 sm:h-6 sm:w-6" />
           </div>
-          <div className="flex flex-col">
-            <div className="flex items-center gap-1.5">
-              <span className="text-lg sm:text-xl font-bold tracking-tight text-foreground">
+          <div className="flex flex-col min-w-0">
+            <div className="flex items-center gap-1">
+              <span className="text-base sm:text-xl font-bold tracking-tight text-foreground">
                 MediGen
               </span>
-              <span className="stamp-badge text-[9px] px-1.5 py-0 border-primary/40 text-primary bg-primary/5 hidden sm:inline-block">
+              <span className="stamp-badge text-[9px] px-1 py-0 border-primary/40 text-primary bg-primary/5 hidden md:inline-block">
                 Journal
               </span>
             </div>
-            <span className="text-[11px] font-handwriting text-muted-foreground text-xs sm:text-sm -mt-0.5 leading-none">
+            <span className="text-[10px] font-handwriting text-muted-foreground sm:text-xs -mt-0.5 leading-none hidden xs:inline-block sm:inline-block truncate">
               clinical notes &amp; slide decks
             </span>
           </div>
@@ -108,8 +108,8 @@ export default function Header() {
           })}
         </nav>
 
-        {/* Mobile Navigation - Icons */}
-        <nav className="md:hidden flex items-center space-x-2">
+        {/* Mobile Navigation - Compact Icons */}
+        <nav className="md:hidden flex items-center gap-0.5 shrink-0">
           {navItems.map((item) => {
             const isActive = pathname === item.href;
             const Icon = item.icon;
@@ -118,20 +118,20 @@ export default function Header() {
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'flex items-center p-2 rounded-lg text-xs transition-colors',
+                  'flex items-center justify-center p-1.5 rounded-lg transition-colors',
                   isActive
-                    ? 'bg-primary/10 text-primary font-bold'
-                    : 'text-muted-foreground hover:text-primary'
+                    ? 'bg-primary/15 text-primary font-bold shadow-2xs'
+                    : 'text-muted-foreground hover:text-primary hover:bg-muted/40'
                 )}
                 title={item.label}
               >
-                <Icon className="h-4 w-4" />
+                <Icon className="h-4 w-4 shrink-0" />
               </Link>
             );
           })}
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {/* Quick Active Mode & Model Stamp */}
           <Link
             href="/settings"

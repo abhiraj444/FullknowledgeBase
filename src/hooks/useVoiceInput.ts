@@ -3,9 +3,48 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 interface UseVoiceInputOptions {
-  onResult?: (text: string) => void;
+  onResult?: (text: string, fullTranscript?: string) => void;
   lang?: string;
   continuous?: boolean;
+}
+
+/**
+ * Extracts only the newly spoken delta from incoming speech recognition results
+ * by eliminating overlaps, duplicate full phrases, and prefixes already emitted in the session.
+ */
+function extractNewDelta(accumulated: string, incoming: string): string {
+  const cleanAcc = accumulated.trim();
+  const cleanInc = incoming.trim();
+  if (!cleanInc) return '';
+  if (!cleanAcc) return cleanInc;
+
+  const lowerAcc = cleanAcc.toLowerCase();
+  const lowerInc = cleanInc.toLowerCase();
+
+  // If already identical or already trailing the accumulated string, ignore
+  if (lowerAcc.endsWith(lowerInc) || lowerAcc === lowerInc) {
+    return '';
+  }
+
+  // If incoming includes the whole accumulated text from start (common Web Speech API pattern)
+  if (lowerInc.startsWith(lowerAcc)) {
+    return cleanInc.slice(cleanAcc.length).trim();
+  }
+
+  // Suffix-prefix word overlap detection
+  const accWords = cleanAcc.split(/\s+/);
+  const incWords = cleanInc.split(/\s+/);
+  const maxOverlap = Math.min(accWords.length, incWords.length);
+
+  for (let overlap = maxOverlap; overlap > 0; overlap--) {
+    const accSlice = accWords.slice(accWords.length - overlap).map((w) => w.toLowerCase()).join(' ');
+    const incSlice = incWords.slice(0, overlap).map((w) => w.toLowerCase()).join(' ');
+    if (accSlice === incSlice) {
+      return incWords.slice(overlap).join(' ');
+    }
+  }
+
+  return cleanInc;
 }
 
 export function useVoiceInput(options: UseVoiceInputOptions = {}) {
@@ -79,17 +118,21 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
           if (i > lastFinalizedIndexRef.current) {
             lastFinalizedIndexRef.current = i;
             const trimmedPiece = piece.trim();
-            if (trimmedPiece && trimmedPiece !== lastEmittedChunkRef.current) {
-              lastEmittedChunkRef.current = trimmedPiece;
-              newlyFinalizedChunk = newlyFinalizedChunk
-                ? `${newlyFinalizedChunk} ${trimmedPiece}`
-                : trimmedPiece;
+            if (trimmedPiece) {
+              const delta = extractNewDelta(accumulatedTextRef.current, trimmedPiece);
+              if (delta && delta !== lastEmittedChunkRef.current) {
+                lastEmittedChunkRef.current = delta;
+                newlyFinalizedChunk = newlyFinalizedChunk
+                  ? `${newlyFinalizedChunk} ${delta}`
+                  : delta;
+              }
             }
           }
         } else {
           // Gather interim text only for non-finalized indices
           if (i > lastFinalizedIndexRef.current) {
-            currentInterim = currentInterim ? `${currentInterim} ${piece}` : piece;
+            const pieceDelta = extractNewDelta(accumulatedTextRef.current, piece.trim());
+            currentInterim = currentInterim ? `${currentInterim} ${pieceDelta}` : pieceDelta;
           }
         }
       }
@@ -104,8 +147,8 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}) {
           setInterimText('');
           const words = trimmed.split(/\s+/).filter(Boolean).length;
           currentSessionWordsRef.current += words;
-          // Send ONLY the newly finalized fragment to callback
-          onResultRef.current?.(trimmed);
+          // Send ONLY the newly finalized non-duplicated fragment to callback
+          onResultRef.current?.(trimmed, accumulatedTextRef.current);
         }
       } else if (currentInterim) {
         setInterimText(currentInterim.trim());

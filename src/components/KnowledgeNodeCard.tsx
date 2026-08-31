@@ -90,12 +90,15 @@ export function KnowledgeNodeCard({
 
   const currentStyle = depthColors[Math.min(node.depth, depthColors.length - 1)];
 
+  const isNewlyDissected = Boolean(node.isNewlyDissected || node.isNew);
+
   return (
     <div
       className={cn(
         'group relative rounded-xl border transition-all duration-150 p-3 sm:p-4 shadow-2xs',
         currentStyle.border,
         currentStyle.bg,
+        isNewlyDissected && !isSelected && 'border-emerald-500/50 bg-emerald-500/5 dark:bg-emerald-950/20 ring-1 ring-emerald-500/30 shadow-xs',
         isSelected && 'ring-2 ring-primary shadow-sm'
       )}
     >
@@ -138,6 +141,16 @@ export function KnowledgeNodeCard({
               <Badge variant="outline" className={cn('text-[9px] px-1.5 py-0 font-medium', currentStyle.badge)}>
                 {currentStyle.label}
               </Badge>
+
+              {isNewlyDissected && (
+                <Badge
+                  variant="secondary"
+                  className="text-[9px] px-1.5 py-0 font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shadow-2xs animate-pulse"
+                >
+                  <Sparkles className="h-2.5 w-2.5 mr-0.5 text-emerald-600 dark:text-emerald-400" />
+                  New Subtopic
+                </Badge>
+              )}
 
               {node.pyqTag && (
                 <Badge

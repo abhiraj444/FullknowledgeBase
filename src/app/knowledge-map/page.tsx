@@ -368,6 +368,7 @@ function KnowledgeMapContent() {
     try {
       const lineage = getNodeLineageTitles(knowledgeMap.tree, node.id);
       const siblings = getNodeSiblingTitles(knowledgeMap.tree, node.id);
+      const existingChildren = node.children?.map((c) => c.title) || [];
 
       const subNodes = await ClientSideAiService.dissectAndExpandKnowledgeNode(
         aiConfig,
@@ -377,6 +378,7 @@ function KnowledgeMapContent() {
           parentTitle: lineage[lineage.length - 2],
           rootTitle: lineage[0],
           siblingTitles: siblings,
+          existingChildrenTitles: existingChildren,
           language,
           audienceMode,
           onStreamChunk: (chunk) => {
@@ -389,6 +391,14 @@ function KnowledgeMapContent() {
         }
       );
 
+      if (!subNodes || subNodes.length === 0) {
+        toast({
+          title: 'Topic is Already Atomic',
+          description: `"${node.title}" is already sufficiently granular. No redundant subtopics were created.`,
+        });
+        return;
+      }
+
       // Insert new children into tree
       const updatedTree = insertChildrenIntoNode(knowledgeMap.tree, node.id, subNodes);
       const updatedMap: KnowledgeMapData = {
@@ -400,8 +410,8 @@ function KnowledgeMapContent() {
       saveMapToDatabase(updatedMap);
 
       toast({
-        title: 'Subtopic Dissected!',
-        description: `Added ${subNodes.length} granular sub-principles under "${node.title}".`,
+        title: '✨ New Subtopics Added!',
+        description: `Generated ${subNodes.length} new granular sub-principles under "${node.title}" (highlighted).`,
       });
     } catch (err: any) {
       if (err?.name === 'AbortError' || abortControllerRef.current?.signal.aborted || ClientSideAiService.isAbortError(err)) {

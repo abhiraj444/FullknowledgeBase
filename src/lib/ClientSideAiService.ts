@@ -2467,7 +2467,7 @@ Produce the complete Markdown outline directly without surrounding commentary.`;
 
     /**
      * Surgical Token-Efficient Node Dissection:
-     * Expands and breaks down a specific subtopic into 3-6 granular sub-subtopics.
+     * Expands and breaks down a specific subtopic into 2-5 granular sub-subtopics.
      * Uses a token-saving Markdown bullet format (saving ~65% tokens vs JSON).
      */
     async dissectAndExpandKnowledgeNode(
@@ -2478,6 +2478,7 @@ Produce the complete Markdown outline directly without surrounding commentary.`;
             parentTitle?: string;
             rootTitle?: string;
             siblingTitles?: string[];
+            existingChildrenTitles?: string[];
             language?: TargetLanguage;
             audienceMode?: AudienceMode;
             onStreamChunk?: (payload: StreamChunkCallbackPayload) => void;
@@ -2488,37 +2489,36 @@ Produce the complete Markdown outline directly without surrounding commentary.`;
         const audienceMode = input.audienceMode || 'doctor';
 
         const prompt = `You are a master academic educator and first-principles knowledge architect.
-Dissect the specified topic into 3 to 6 granular, logical, and non-overlapping subtopics.
+Your task is to analyze the concept "${input.targetNode.title}" and determine if it can be meaningfully deconstructed into 2 to 5 deeper, non-overlapping, granular sub-mechanisms or subtopics.
 
-**Surgical Context:**
+**Surgical Context Hierarchy:**
 - Document Overview: ${input.documentSummary.slice(0, 800)}
 ${input.rootTitle ? `- Domain / Subject: ${input.rootTitle}` : ''}
 ${input.parentTitle ? `- Parent Category: ${input.parentTitle}` : ''}
-${input.siblingTitles && input.siblingTitles.length > 0 ? `- Sibling Subtopics (DO NOT DUPLICATE THESE): ${input.siblingTitles.join(', ')}` : ''}
+${input.siblingTitles && input.siblingTitles.length > 0 ? `- Sibling Topics (DO NOT DUPLICATE): ${input.siblingTitles.join(', ')}` : ''}
+${input.existingChildrenTitles && input.existingChildrenTitles.length > 0 ? `- Existing Subtopics Already Present (DO NOT REWRITE OR DUPLICATE): ${input.existingChildrenTitles.join(', ')}` : ''}
 
 **Target Node To Dissect:**
 - Title: "${input.targetNode.title}"
-- Current Summary: "${input.targetNode.description}"
+- Summary: "${input.targetNode.description}"
 - Current Depth: ${input.targetNode.depth}
 
-**Task:**
-Deconstruct "${input.targetNode.title}" into 3 to 6 deeper, highly specific sub-subtopics that provide deep clarity.
-For each subtopic, provide:
-- Concept name with numeric numbering
-- Optional [PYQ: Tag] (e.g. "High Yield", "Frequently Tested", "Must-Know Mechanism")
-- Optional [ANCHOR: Principle] (1-sentence ground-truth invariant)
-- 1-2 sentence orientation description under the bullet (prefixed with >)
+**STRICT ATOMICITY & NON-DUPLICATION DIRECTIVE:**
+1. NO REPETITION / REWRITING: Do NOT rephrase, restate, or output "${input.targetNode.title}", its parent, or any sibling/existing subtopics.
+2. NO PLACEHOLDER / GENERIC FILLER: Do not output generic categories like "Overview", "Introduction", "Summary", or trivial rewrites.
+3. ATOMIC STOP CRITERIA: If "${input.targetNode.title}" is already atomic, sufficiently granular, or already fully covered with no genuinely distinct deeper sub-mechanisms to break down, respond ONLY with:
+NO_FURTHER_SUBTOPICS
 
-**Target Language:** ${language.toUpperCase()}
-**Target Mode:** ${audienceMode === 'simplified' ? 'Simplified / Intuitive' : 'Academic / In-Depth'}
-
-**Strict Output Format (Token-Efficient Markdown Bullets):**
+4. If genuine, distinct, deeper sub-principles exist, provide 2 to 5 new subtopics in this exact token-efficient Markdown format:
 * 1. Specific Sub-concept Name [PYQ: High-Yield PYQ] [ANCHOR: Ground truth mechanism]
   > Clear 1-2 sentence orientation explaining this subtopic.
 * 2. Second Sub-concept Name [PYQ: Frequently Tested]
   > Clear 1-2 sentence description.
 
-Produce ONLY the Markdown bullet list directly.`;
+**Target Language:** ${language.toUpperCase()}
+**Target Mode:** ${audienceMode === 'simplified' ? 'Simplified / Intuitive' : 'Academic / In-Depth'}
+
+Produce ONLY the Markdown bullet list or "NO_FURTHER_SUBTOPICS".`;
 
         const text = await this._runPrompt(
             apiKeyOrConfig,
@@ -2528,7 +2528,7 @@ Produce ONLY the Markdown bullet list directly.`;
             { signal: input.signal }
         );
 
-        return parseDissectMarkdownResponse(text, input.targetNode);
+        return parseDissectMarkdownResponse(text, input.targetNode, input.existingChildrenTitles || []);
     },
 
     /**
@@ -3108,16 +3108,41 @@ export function parseMarkdownKnowledgeOutline(
 }
 
 /**
+ * Normalizes title string for duplicate and self-collision detection.
+ */
+function normalizeConceptTitle(title: string): string {
+    return title.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+}
+
+/**
  * Parses subtopic dissection response from Markdown bullets or JSON.
  */
 export function parseDissectMarkdownResponse(
     text: string,
-    targetNode: { id: string; title: string; depth: number }
+    targetNode: { id: string; title: string; depth: number },
+    existingChildrenTitles: string[] = []
 ): KnowledgeTreeNode[] {
     const parentId = targetNode.id;
     const newDepth = targetNode.depth + 1;
     const { cleanText: cleanedRaw } = stripThinkingTags(text || '');
     const textClean = cleanedRaw.trim();
+
+    // 0. If AI determined concept is already atomic or has no further subtopics
+    const normalizedRaw = textClean.toLowerCase();
+    if (
+        normalizedRaw.includes('no_further_subtopics') ||
+        normalizedRaw.includes('no further subtopics') ||
+        normalizedRaw.includes('already atomic') ||
+        normalizedRaw.includes('no new subtopics') ||
+        normalizedRaw.includes('sufficiently granular')
+    ) {
+        return [];
+    }
+
+    const normalizedTarget = normalizeConceptTitle(targetNode.title);
+    const normalizedExisting = new Set(
+        existingChildrenTitles.map((t) => normalizeConceptTitle(t)).filter(Boolean)
+    );
 
     // 1. Try Markdown bullet parsing first
     const lines = textClean.split('\n');
@@ -3134,6 +3159,12 @@ export function parseDissectMarkdownResponse(
         if (bulletMatch) {
             const rawContent = bulletMatch[2].trim();
             const { cleanText, pyqTag, firstPrincipleAnchor } = extractTaggedMetadata(rawContent);
+            const normTitle = normalizeConceptTitle(cleanText);
+
+            // Ignore if identical to target node or already in existing children
+            if (normTitle && (normTitle === normalizedTarget || normalizedExisting.has(normTitle))) {
+                continue;
+            }
 
             currentNode = {
                 id: `${parentId}_dissect_${idxCounter++}_${Date.now().toString(36).slice(-4)}`,
@@ -3143,8 +3174,12 @@ export function parseDissectMarkdownResponse(
                 pyqTag,
                 firstPrincipleAnchor,
                 isExpanded: true,
+                isNewlyDissected: true,
+                isNew: true,
+                dissectedAt: Date.now(),
             };
             nodes.push(currentNode);
+            normalizedExisting.add(normTitle);
             continue;
         }
 
@@ -3185,59 +3220,55 @@ export function parseDissectMarkdownResponse(
     }
 
     if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((item, idx) => {
-            if (typeof item === 'string') {
-                return {
-                    id: `${parentId}_dissect_${idx + 1}_${Date.now().toString(36).slice(-4)}`,
-                    title: item.trim(),
-                    description: '',
-                    depth: newDepth,
-                    isExpanded: true,
-                };
-            }
-            const title =
-                typeof item.title === 'string' && item.title.trim()
+        const jsonNodes: KnowledgeTreeNode[] = [];
+        for (let idx = 0; idx < parsed.length; idx++) {
+            const item = parsed[idx];
+            const rawTitle =
+                typeof item === 'string'
+                    ? item.trim()
+                    : typeof item.title === 'string' && item.title.trim()
                     ? item.title.trim()
                     : typeof item.name === 'string' && item.name.trim()
                     ? item.name.trim()
-                    : `Subtopic ${idx + 1}`;
-
-            const description =
-                typeof item.description === 'string'
-                    ? item.description.trim()
-                    : typeof item.desc === 'string'
-                    ? item.desc.trim()
                     : '';
 
-            return {
+            if (!rawTitle) continue;
+            const normTitle = normalizeConceptTitle(rawTitle);
+            if (normTitle === normalizedTarget || normalizedExisting.has(normTitle)) {
+                continue;
+            }
+
+            const description =
+                typeof item === 'object' && item !== null
+                    ? typeof item.description === 'string'
+                        ? item.description.trim()
+                        : typeof item.desc === 'string'
+                        ? item.desc.trim()
+                        : ''
+                    : '';
+
+            jsonNodes.push({
                 id: `${parentId}_dissect_${idx + 1}_${Date.now().toString(36).slice(-4)}`,
-                title,
+                title: rawTitle,
                 description,
                 depth: newDepth,
-                pyqTag: item.pyqTag || item.pyq_tag || item.tag,
-                firstPrincipleAnchor: item.firstPrincipleAnchor || item.first_principle_anchor || item.anchor,
+                pyqTag: typeof item === 'object' && item !== null ? (item.pyqTag || item.pyq_tag || item.tag) : undefined,
+                firstPrincipleAnchor: typeof item === 'object' && item !== null ? (item.firstPrincipleAnchor || item.first_principle_anchor || item.anchor) : undefined,
                 isExpanded: true,
-            };
-        });
+                isNewlyDissected: true,
+                isNew: true,
+                dissectedAt: Date.now(),
+            });
+            normalizedExisting.add(normTitle);
+        }
+
+        if (jsonNodes.length > 0) {
+            return jsonNodes;
+        }
     }
 
-    // 3. Fallback default nodes
-    return [
-        {
-            id: `${parentId}_dissect_1_${Date.now().toString(36).slice(-4)}`,
-            title: `${targetNode.title}: Core Mechanism`,
-            description: 'Fundamental processes and governing principles.',
-            depth: newDepth,
-            isExpanded: true,
-        },
-        {
-            id: `${parentId}_dissect_2_${Date.now().toString(36).slice(-4)}`,
-            title: `${targetNode.title}: Practical & Exam Takeaways`,
-            description: 'High-yield rules, diagnostic criteria, and problem solving patterns.',
-            depth: newDepth,
-            isExpanded: true,
-        },
-    ];
+    // If nothing valid was parsed or all were duplicates, return empty array (do not return fake default duplicates)
+    return [];
 }
 
 function createDefaultKnowledgeMap(userPromptOrTopic?: string, titleOverride?: string) {

@@ -156,6 +156,12 @@ export function KnowledgeStudyStage({
               <span className="stamp-badge text-[9px] border-primary/40 text-primary bg-primary/5">
                 Depth Level {node.depth}
               </span>
+              {(node.isNewlyDissected || node.isNew) && (
+                <Badge variant="secondary" className="text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-bold">
+                  <Sparkles className="h-3 w-3 mr-1 text-emerald-600 dark:text-emerald-400" />
+                  Newly Dissected
+                </Badge>
+              )}
               {node.pyqTag && (
                 <Badge variant="secondary" className="text-[10px] bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
                   <Zap className="h-3 w-3 mr-1 text-amber-500" />
