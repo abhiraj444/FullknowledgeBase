@@ -12,19 +12,20 @@ interface ClinicalMarkdownRendererProps {
 }
 
 /**
- * Extracts human-readable markdown from potentially JSON-wrapped or raw text strings.
+ * Extracts human-readable markdown from potentially JSON-wrapped, backtick-fenced, or raw text strings.
  */
 function extractReadableContent(raw: string): string {
   if (!raw) return '';
   let str = raw.trim();
 
-  // 1. Strip triple backtick blocks if it wrapped the entire response
-  if (str.startsWith('```json') && str.endsWith('```')) {
-    str = str.slice(7, -3).trim();
-  } else if (str.startsWith('```markdown') && str.endsWith('```')) {
-    str = str.slice(11, -3).trim();
-  } else if (str.startsWith('```') && str.endsWith('```')) {
-    str = str.slice(3, -3).trim();
+  // 1. Strip outer code fences (```markdown, ```md, ```json, ```text, ```)
+  // Handles multi-line or streaming text with or without trailing fence
+  if (/^```(?:markdown|md|json|text)?\s*[\r\n]/i.test(str)) {
+    str = str.replace(/^```(?:markdown|md|json|text)?\s*[\r\n]/i, '');
+    str = str.replace(/[\r\n]\s*```\s*$/i, '');
+    str = str.trim();
+  } else if (str.startsWith('```') && str.endsWith('```') && str.length >= 6) {
+    str = str.replace(/^```[a-zA-Z]*\s*/, '').replace(/\s*```$/, '').trim();
   }
 
   // 2. If it's a JSON object string, try to parse and extract relevant medical/academic fields
@@ -32,13 +33,13 @@ function extractReadableContent(raw: string): string {
     try {
       const parsed = JSON.parse(str);
       if (typeof parsed === 'object' && parsed !== null) {
-        if (typeof parsed.text === 'string' && parsed.text.trim()) return parsed.text;
-        if (typeof parsed.answer === 'string' && parsed.answer.trim()) return parsed.answer;
-        if (typeof parsed.explanation === 'string' && parsed.explanation.trim()) return parsed.explanation;
-        if (typeof parsed.content === 'string' && parsed.content.trim()) return parsed.content;
-        if (typeof parsed.analysis === 'string' && parsed.analysis.trim()) return parsed.analysis;
-        if (typeof parsed.summary === 'string' && parsed.summary.trim()) return parsed.summary;
-        if (typeof parsed.rationale === 'string' && parsed.rationale.trim()) return parsed.rationale;
+        if (typeof parsed.text === 'string' && parsed.text.trim()) return extractReadableContent(parsed.text);
+        if (typeof parsed.answer === 'string' && parsed.answer.trim()) return extractReadableContent(parsed.answer);
+        if (typeof parsed.explanation === 'string' && parsed.explanation.trim()) return extractReadableContent(parsed.explanation);
+        if (typeof parsed.content === 'string' && parsed.content.trim()) return extractReadableContent(parsed.content);
+        if (typeof parsed.analysis === 'string' && parsed.analysis.trim()) return extractReadableContent(parsed.analysis);
+        if (typeof parsed.summary === 'string' && parsed.summary.trim()) return extractReadableContent(parsed.summary);
+        if (typeof parsed.rationale === 'string' && parsed.rationale.trim()) return extractReadableContent(parsed.rationale);
         
         // If it's a structured response with sections, reconstruct clean markdown
         const parts: string[] = [];
@@ -180,30 +181,33 @@ function normalizeBiomedicalNotation(raw: string): string {
 
   let text = raw;
 
-  // 1. Remove inadvertent 4-space indentation from normal markdown text so it doesn't turn into pre/code blocks
-  // (Preserve code blocks that are explicitly wrapped in ```)
-  const lines = text.split('\n');
-  let inCodeBlock = false;
-  const processedLines: string[] = [];
+  // 1. Remove accidental indentation from markdown text lines that triggers CommonMark indented code blocks (<pre><code>)
+  // Preserve explicit fenced code blocks ``` ... ```
+  const rawLines = text.split('\n');
+  let inFencedCode = false;
+  const cleanedLines: string[] = [];
 
-  for (const line of lines) {
+  for (const line of rawLines) {
     if (line.trim().startsWith('```')) {
-      inCodeBlock = !inCodeBlock;
-      processedLines.push(line);
+      inFencedCode = !inFencedCode;
+      cleanedLines.push(line);
       continue;
     }
-    if (!inCodeBlock) {
-      // If line is indented with 4+ spaces or a tab, but is actually markdown (header, list, table, text), trim leading indent
-      if (/^\s{4,}/.test(line) && !line.startsWith('    //') && !line.startsWith('    const ') && !line.startsWith('    function ')) {
-        processedLines.push(line.replace(/^\s{2,4}/, ''));
+    if (!inFencedCode) {
+      // If line is not a code block, strip leading spaces from headers, lists, blockquotes, tables, hr, math
+      if (/^\s{1,8}(#|>|\*|-|•|\d+[\.\)]|\$\$|\\\[|\||---|___|\*\*\*)/.test(line)) {
+        cleanedLines.push(line.trimStart());
+      } else if (/^\s{4,}/.test(line) && !/^\s{4,}(const |let |var |function |class |import |export |\/\/|\/\*)/.test(line)) {
+        // Strip 4-space indent that would trigger indented code block
+        cleanedLines.push(line.trimStart());
       } else {
-        processedLines.push(line);
+        cleanedLines.push(line);
       }
     } else {
-      processedLines.push(line);
+      cleanedLines.push(line);
     }
   }
-  text = processedLines.join('\n');
+  text = cleanedLines.join('\n');
 
   // 2. Normalize unescaped double-backslashes from JSON string serialization (e.g. \\frac -> \frac)
   text = text.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
@@ -303,14 +307,19 @@ export function ClinicalMarkdownRenderer({ content, className = '' }: ClinicalMa
               {children}
             </blockquote>
           ),
-          code: ({ children, className }) => {
+          pre: ({ children }) => (
+            <pre className="p-3 rounded-lg bg-muted/80 font-mono text-[11px] text-foreground overflow-x-auto border border-border my-2.5">
+              {children}
+            </pre>
+          ),
+          code: ({ children, className }: any) => {
             const isInline = !className;
             return isInline ? (
               <code className="px-1.5 py-0.5 rounded bg-muted font-mono text-[11px] text-foreground border border-border/60">
                 {children}
               </code>
             ) : (
-              <code className="block p-3 rounded-lg bg-muted/80 font-mono text-[11px] text-foreground overflow-x-auto border border-border my-2.5">
+              <code className="font-mono text-[11px] text-foreground">
                 {children}
               </code>
             );

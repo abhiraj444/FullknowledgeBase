@@ -31,6 +31,7 @@ import {
 import type { KnowledgeMapData, KnowledgeTreeNode } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
 import { registerNotoSansRegular } from '@/lib/pdf-fonts/NotoSansRegular';
 import { registerNotoSansBold } from '@/lib/pdf-fonts/NotoSansBold';
 import { registerNotoSansItalic } from '@/lib/pdf-fonts/NotoSansItalic';
@@ -344,149 +345,6 @@ function simpleMarkdownToHtml(md: string): string {
   return htmlLines.join('\n');
 }
 
-interface MarkdownBlock {
-  type: 'paragraph' | 'bullet_list' | 'numbered_list' | 'table';
-  text?: string;
-  items?: string[];
-  headers?: string[];
-  rows?: string[][];
-}
-
-function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
-  if (!markdown) return [];
-  const lines = markdown.split('\n');
-  const blocks: MarkdownBlock[] = [];
-  let currentParagraph: string[] = [];
-  let currentBullets: string[] = [];
-  let currentNumbered: string[] = [];
-  let tableLines: string[] = [];
-
-  const flushParagraph = () => {
-    if (currentParagraph.length > 0) {
-      const text = currentParagraph.join(' ').trim();
-      if (text && !/^(---|___|\*\*\*)$/.test(text)) {
-        blocks.push({ type: 'paragraph', text });
-      }
-      currentParagraph = [];
-    }
-  };
-
-  const flushBullets = () => {
-    if (currentBullets.length > 0) {
-      blocks.push({ type: 'bullet_list', items: [...currentBullets] });
-      currentBullets = [];
-    }
-  };
-
-  const flushNumbered = () => {
-    if (currentNumbered.length > 0) {
-      blocks.push({ type: 'numbered_list', items: [...currentNumbered] });
-      currentNumbered = [];
-    }
-  };
-
-  const flushTable = () => {
-    if (tableLines.length >= 2) {
-      const parseRow = (line: string) => {
-        let clean = line.trim();
-        if (clean.startsWith('|')) clean = clean.slice(1);
-        if (clean.endsWith('|')) clean = clean.slice(0, -1);
-        return clean.split('|').map((c) => c.trim());
-      };
-
-      const rawHeaders = parseRow(tableLines[0]);
-      const dataRows: string[][] = [];
-
-      for (let j = 1; j < tableLines.length; j++) {
-        const rowLine = tableLines[j].trim();
-        if (/^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(rowLine)) {
-          continue;
-        }
-        const cells = parseRow(rowLine);
-        if (cells.length > 0 && cells.some((c) => c.length > 0)) {
-          dataRows.push(cells);
-        }
-      }
-
-      if (rawHeaders.length > 0 && dataRows.length > 0) {
-        blocks.push({ type: 'table', headers: rawHeaders, rows: dataRows });
-      } else {
-        tableLines.forEach((tl) => {
-          if (!/^(---|___|\*\*\*)$/.test(tl.trim())) {
-            currentParagraph.push(tl);
-          }
-        });
-      }
-      tableLines = [];
-    } else {
-      tableLines.forEach((tl) => {
-        if (!/^(---|___|\*\*\*)$/.test(tl.trim())) {
-          currentParagraph.push(tl);
-        }
-      });
-      tableLines = [];
-    }
-  };
-
-  for (let i = 0; i < lines.length; i++) {
-    const rawLine = lines[i];
-    const trimmed = rawLine.trim();
-
-    if (!trimmed) {
-      flushParagraph();
-      flushBullets();
-      flushNumbered();
-      flushTable();
-      continue;
-    }
-
-    if (/^(---|___|\*\*\*)$/.test(trimmed)) {
-      flushParagraph();
-      flushBullets();
-      flushNumbered();
-      flushTable();
-      continue;
-    }
-
-    if (trimmed.includes('|') && (trimmed.startsWith('|') || trimmed.split('|').length >= 3)) {
-      flushParagraph();
-      flushBullets();
-      flushNumbered();
-      tableLines.push(trimmed);
-      continue;
-    } else if (tableLines.length > 0) {
-      flushTable();
-    }
-
-    if (/^[\*\-•]\s+/.test(trimmed)) {
-      flushParagraph();
-      flushNumbered();
-      currentBullets.push(trimmed.replace(/^[\*\-•]\s+/, ''));
-      continue;
-    } else if (currentBullets.length > 0) {
-      flushBullets();
-    }
-
-    if (/^\d+[\.\)]\s+/.test(trimmed)) {
-      flushParagraph();
-      flushBullets();
-      currentNumbered.push(trimmed.replace(/^\d+[\.\)]\s+/, ''));
-      continue;
-    } else if (currentNumbered.length > 0) {
-      flushNumbered();
-    }
-
-    currentParagraph.push(trimmed);
-  }
-
-  flushParagraph();
-  flushBullets();
-  flushNumbered();
-  flushTable();
-
-  return blocks;
-}
-
 /**
  * Robust callout box renderer for jsPDF that handles multi-line text, pagination, and borders without overflowing.
  */
@@ -506,207 +364,6 @@ interface PdfCardRenderParams {
   fontSize?: number;
   currentY: number;
   onPageBreak: () => number;
-}
-
-interface PdfRichCardRenderParams {
-  doc: jsPDF;
-  title?: string;
-  markdownContent: string;
-  margin: number;
-  indent: number;
-  contentWidth: number;
-  bottomLimit: number;
-  fillColor: [number, number, number];
-  borderColor: [number, number, number];
-  titleColor: [number, number, number];
-  textColor: [number, number, number];
-  isItalic?: boolean;
-  fontSize?: number;
-  currentY: number;
-  onPageBreak: () => number;
-}
-
-function renderPdfRichCard(params: PdfRichCardRenderParams): number {
-  const {
-    doc,
-    title,
-    markdownContent,
-    margin,
-    indent,
-    contentWidth,
-    bottomLimit,
-    fillColor,
-    borderColor,
-    titleColor,
-    textColor,
-    isItalic = false,
-    fontSize = 7.8,
-    onPageBreak,
-  } = params;
-
-  let y = params.currentY;
-  const blocks = parseMarkdownBlocks(markdownContent);
-
-  // If no tables or lists exist, use optimized single card renderer
-  const hasTablesOrLists = blocks.some((b) => b.type === 'table' || b.type === 'bullet_list' || b.type === 'numbered_list');
-
-  if (!hasTablesOrLists) {
-    const rawClean = stripMarkdown(markdownContent);
-    doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
-    doc.setFontSize(fontSize);
-    const plainLines = doc.splitTextToSize(rawClean, contentWidth - indent - 8);
-    return renderPdfCard({
-      doc,
-      title,
-      lines: plainLines,
-      margin,
-      indent,
-      contentWidth,
-      bottomLimit,
-      fillColor,
-      borderColor,
-      titleColor,
-      textColor,
-      isItalic,
-      fontSize,
-      currentY: y,
-      onPageBreak,
-    });
-  }
-
-  // Multi-element rich card renderer with tables and bullet points
-  const cardWidth = contentWidth - indent;
-  const cardX = margin + indent;
-
-  if (bottomLimit - y < 22) {
-    y = onPageBreak();
-  }
-
-  if (title) {
-    doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
-    doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
-    doc.roundedRect(cardX, y, cardWidth, 6.5, 1, 1, 'FD');
-
-    doc.setFont('NotoSans', 'bold');
-    doc.setFontSize(fontSize + 0.4);
-    doc.setTextColor(titleColor[0], titleColor[1], titleColor[2]);
-    doc.text(title, cardX + 3.5, y + 4.5);
-    y += 8.5;
-  }
-
-  for (const block of blocks) {
-    if (block.type === 'paragraph' && block.text) {
-      const cleanP = stripMarkdown(block.text);
-      if (!cleanP) continue;
-
-      doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
-      doc.setFontSize(fontSize);
-      doc.setTextColor(textColor[0], textColor[1], textColor[2]);
-      const pLines = doc.splitTextToSize(cleanP, cardWidth - 6);
-      const pHeight = pLines.length * (fontSize * 0.46);
-
-      if (y + pHeight > bottomLimit) {
-        y = onPageBreak();
-      }
-
-      for (const line of pLines) {
-        doc.text(line, cardX + 2.5, y + 3.5);
-        y += fontSize * 0.46;
-      }
-      y += 2.5;
-    } else if (block.type === 'bullet_list' && block.items) {
-      for (const itemText of block.items) {
-        const cleanItem = stripMarkdown(itemText);
-        if (!cleanItem) continue;
-
-        doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
-        doc.setFontSize(fontSize);
-        const itemLines = doc.splitTextToSize(cleanItem, cardWidth - 10);
-        const itemHeight = itemLines.length * (fontSize * 0.46);
-
-        if (y + itemHeight > bottomLimit) {
-          y = onPageBreak();
-        }
-
-        doc.setFont('NotoSans', 'bold');
-        doc.setTextColor(titleColor[0], titleColor[1], titleColor[2]);
-        doc.text('•', cardX + 3, y + 3.5);
-
-        doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
-        doc.setTextColor(textColor[0], textColor[1], textColor[2]);
-        for (const line of itemLines) {
-          doc.text(line, cardX + 6.5, y + 3.5);
-          y += fontSize * 0.46;
-        }
-        y += 1.5;
-      }
-      y += 1.5;
-    } else if (block.type === 'numbered_list' && block.items) {
-      block.items.forEach((itemText, idx) => {
-        const cleanItem = stripMarkdown(itemText);
-        if (!cleanItem) continue;
-
-        doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
-        doc.setFontSize(fontSize);
-        const itemLines = doc.splitTextToSize(cleanItem, cardWidth - 12);
-        const itemHeight = itemLines.length * (fontSize * 0.46);
-
-        if (y + itemHeight > bottomLimit) {
-          y = onPageBreak();
-        }
-
-        doc.setFont('NotoSans', 'bold');
-        doc.setTextColor(titleColor[0], titleColor[1], titleColor[2]);
-        doc.text(`${idx + 1}.`, cardX + 2.5, y + 3.5);
-
-        doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
-        doc.setTextColor(textColor[0], textColor[1], textColor[2]);
-        for (const line of itemLines) {
-          doc.text(line, cardX + 7.5, y + 3.5);
-          y += fontSize * 0.46;
-        }
-        y += 1.5;
-      });
-      y += 1.5;
-    } else if (block.type === 'table' && block.headers && block.rows) {
-      if (bottomLimit - y < 35) {
-        y = onPageBreak();
-      }
-
-      const cleanHeaders = block.headers.map((h) => stripMarkdown(h));
-      const cleanRows = block.rows.map((row) => row.map((cell) => stripMarkdown(cell)));
-
-      (doc as any).autoTable({
-        startY: y + 1,
-        head: [cleanHeaders],
-        body: cleanRows,
-        margin: { left: cardX, right: margin },
-        theme: 'grid',
-        styles: {
-          font: 'NotoSans',
-          fontSize: 7.5,
-          cellPadding: 2,
-          overflow: 'linebreak',
-          textColor: [30, 41, 59],
-        },
-        headStyles: {
-          fillColor: titleColor,
-          textColor: 255,
-          fontStyle: 'bold',
-          fontSize: 7.8,
-        },
-        alternateRowStyles: {
-          fillColor: [248, 250, 252],
-        },
-      });
-
-      y = (doc as any).lastAutoTable?.finalY
-        ? (doc as any).lastAutoTable.finalY + 4
-        : y + 15;
-    }
-  }
-
-  return y + 2;
 }
 
 function renderPdfCard(params: PdfCardRenderParams): number {
@@ -842,6 +499,315 @@ function renderPdfCard(params: PdfCardRenderParams): number {
   return y;
 }
 
+function cleanMarkdownForPdf(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    .replace(/`(.*?)`/g, '$1')
+    .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+    .replace(/\$\$(.*?)\$\$/gs, '$1')
+    .replace(/\$(.*?)\$/g, '$1')
+    .replace(/\\\[(.*?)\\\]/gs, '$1')
+    .replace(/\\\((.*?)\\\)/g, '$1')
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '$1 / $2')
+    .replace(/\\text\{([^}]+)\}/g, '$1')
+    .replace(/\\rightarrow/g, '→')
+    .replace(/\\leftarrow/g, '←')
+    .replace(/\\uparrow/g, '↑')
+    .replace(/\\downarrow/g, '↓')
+    .replace(/\\pm/g, '±')
+    .replace(/\\le(q)?/g, '≤')
+    .replace(/\\ge(q)?/g, '≥')
+    .replace(/\\approx/g, '≈')
+    .replace(/\\times/g, '×')
+    .replace(/\\degree/g, '°')
+    .replace(/\\circ/g, '°')
+    .replace(/\\([a-zA-Z]+)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+interface MarkdownBlock {
+  type: 'paragraph' | 'bullet_list' | 'numbered_list' | 'table';
+  text?: string;
+  items?: string[];
+  headers?: string[];
+  rows?: string[][];
+}
+
+function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
+  if (!markdown) return [];
+  const lines = markdown.split('\n');
+  const blocks: MarkdownBlock[] = [];
+  let currentParagraph: string[] = [];
+  let currentBullets: string[] = [];
+  let currentNumbered: string[] = [];
+  let tableLines: string[] = [];
+
+  const flushParagraph = () => {
+    if (currentParagraph.length > 0) {
+      const text = currentParagraph.join(' ').trim();
+      if (text) blocks.push({ type: 'paragraph', text });
+      currentParagraph = [];
+    }
+  };
+
+  const flushBullets = () => {
+    if (currentBullets.length > 0) {
+      blocks.push({ type: 'bullet_list', items: [...currentBullets] });
+      currentBullets = [];
+    }
+  };
+
+  const flushNumbered = () => {
+    if (currentNumbered.length > 0) {
+      blocks.push({ type: 'numbered_list', items: [...currentNumbered] });
+      currentNumbered = [];
+    }
+  };
+
+  const flushTable = () => {
+    if (tableLines.length >= 2) {
+      const parseRow = (line: string) =>
+        line
+          .replace(/^\|/, '')
+          .replace(/\|$/, '')
+          .split('|')
+          .map((c) => c.trim());
+
+      const headers = parseRow(tableLines[0]);
+      const dataRows = tableLines.slice(1).filter((l) => !/^\|?[\s-:]+\|?$/.test(l.trim()));
+      const rows = dataRows.map(parseRow);
+      if (headers.length > 0) {
+        blocks.push({ type: 'table', headers, rows });
+      }
+      tableLines = [];
+    } else {
+      tableLines = [];
+    }
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (line.startsWith('|')) {
+      flushParagraph();
+      flushBullets();
+      flushNumbered();
+      tableLines.push(line);
+      continue;
+    } else if (tableLines.length > 0) {
+      flushTable();
+    }
+
+    if (/^[-*•]\s+/.test(line)) {
+      flushParagraph();
+      flushNumbered();
+      currentBullets.push(line.replace(/^[-*•]\s+/, ''));
+      continue;
+    } else if (/^\d+[\.\)]\s+/.test(line)) {
+      flushParagraph();
+      flushBullets();
+      currentNumbered.push(line.replace(/^\d+[\.\)]\s+/, ''));
+      continue;
+    }
+
+    if (!line) {
+      flushParagraph();
+      flushBullets();
+      flushNumbered();
+      continue;
+    }
+
+    if (currentBullets.length > 0) {
+      flushBullets();
+    }
+    if (currentNumbered.length > 0) {
+      flushNumbered();
+    }
+
+    currentParagraph.push(line);
+  }
+
+  flushParagraph();
+  flushBullets();
+  flushNumbered();
+  flushTable();
+
+  return blocks;
+}
+
+interface PdfRichCardRenderParams {
+  doc: jsPDF;
+  title?: string;
+  markdown: string;
+  margin: number;
+  indent: number;
+  contentWidth: number;
+  bottomLimit: number;
+  fillColor: [number, number, number];
+  borderColor: [number, number, number];
+  titleColor: [number, number, number];
+  textColor: [number, number, number];
+  isItalic?: boolean;
+  fontSize?: number;
+  currentY: number;
+  onPageBreak: () => number;
+}
+
+function renderPdfRichCard(params: PdfRichCardRenderParams): number {
+  const {
+    doc,
+    title,
+    markdown,
+    margin,
+    indent,
+    contentWidth,
+    bottomLimit,
+    fillColor,
+    borderColor,
+    titleColor,
+    textColor,
+    isItalic = false,
+    fontSize = 7.8,
+    onPageBreak,
+  } = params;
+
+  let y = params.currentY;
+  const cardWidth = contentWidth - indent;
+  const cardX = margin + indent;
+  const textX = cardX + 3.5;
+  const innerWidth = cardWidth - 7;
+  const lineHeight = fontSize * 0.46;
+
+  const blocks = parseMarkdownBlocks(markdown);
+  if (blocks.length === 0) return y;
+
+  if (y + 18 > bottomLimit) {
+    y = onPageBreak();
+  }
+
+  // Draw Header / Title Box if provided
+  if (title) {
+    doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
+    doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+    doc.roundedRect(cardX, y, cardWidth, 6.5, 1, 1, 'FD');
+
+    doc.setFont('NotoSans', 'bold');
+    doc.setFontSize(fontSize + 0.4);
+    doc.setTextColor(titleColor[0], titleColor[1], titleColor[2]);
+    doc.text(title, textX, y + 4.5);
+    y += 8.5;
+  }
+
+  for (const block of blocks) {
+    if (block.type === 'paragraph' && block.text) {
+      doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
+      doc.setFontSize(fontSize);
+      doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+
+      const cleanP = cleanMarkdownForPdf(block.text);
+      const pLines = doc.splitTextToSize(cleanP, innerWidth);
+      const pHeight = pLines.length * lineHeight;
+
+      if (y + pHeight > bottomLimit) {
+        y = onPageBreak();
+      }
+
+      doc.text(pLines, textX, y + lineHeight * 0.8);
+      y += pHeight + 2.5;
+    } else if (block.type === 'bullet_list' && block.items) {
+      for (const itemText of block.items) {
+        doc.setFont('NotoSans', 'normal');
+        doc.setFontSize(fontSize);
+        doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+
+        const cleanItem = cleanMarkdownForPdf(itemText);
+        const itemLines = doc.splitTextToSize(cleanItem, innerWidth - 5);
+        const itHeight = itemLines.length * lineHeight;
+
+        if (y + itHeight > bottomLimit) {
+          y = onPageBreak();
+        }
+
+        doc.setFont('NotoSans', 'bold');
+        doc.setTextColor(titleColor[0], titleColor[1], titleColor[2]);
+        doc.text('•', textX, y + lineHeight * 0.8);
+
+        doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
+        doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+        doc.text(itemLines, textX + 4, y + lineHeight * 0.8);
+        y += itHeight + 1.8;
+      }
+      y += 1.5;
+    } else if (block.type === 'numbered_list' && block.items) {
+      block.items.forEach((itemText, idx) => {
+        doc.setFont('NotoSans', 'normal');
+        doc.setFontSize(fontSize);
+        doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+
+        const cleanItem = cleanMarkdownForPdf(itemText);
+        const itemLines = doc.splitTextToSize(cleanItem, innerWidth - 6);
+        const itHeight = itemLines.length * lineHeight;
+
+        if (y + itHeight > bottomLimit) {
+          y = onPageBreak();
+        }
+
+        doc.setFont('NotoSans', 'bold');
+        doc.setTextColor(titleColor[0], titleColor[1], titleColor[2]);
+        doc.text(`${idx + 1}.`, textX, y + lineHeight * 0.8);
+
+        doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
+        doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+        doc.text(itemLines, textX + 5, y + lineHeight * 0.8);
+        y += itHeight + 1.8;
+      });
+      y += 1.5;
+    } else if (block.type === 'table' && block.headers && block.rows) {
+      if (y + 25 > bottomLimit) {
+        y = onPageBreak();
+      }
+
+      const cleanHeaders = block.headers.map((h) => cleanMarkdownForPdf(h));
+      const cleanRows = block.rows.map((r) => r.map((c) => cleanMarkdownForPdf(c)));
+
+      (doc as any).autoTable({
+        startY: y,
+        head: [cleanHeaders],
+        body: cleanRows,
+        margin: { left: cardX, right: margin },
+        theme: 'grid',
+        styles: {
+          font: 'NotoSans',
+          fontSize: 7.2,
+          cellPadding: 2,
+          overflow: 'linebreak',
+          textColor: [30, 41, 59],
+        },
+        headStyles: {
+          fillColor: titleColor,
+          textColor: 255,
+          fontStyle: 'bold',
+          fontSize: 7.5,
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252],
+        },
+      });
+
+      y = (doc as any).lastAutoTable?.finalY
+        ? (doc as any).lastAutoTable.finalY + 4
+        : y + 15;
+    }
+  }
+
+  return y + 2;
+}
+
 export function KnowledgePdfExportModal({
   isOpen,
   onClose,
@@ -945,7 +911,7 @@ export function KnowledgePdfExportModal({
         currentY = renderPdfRichCard({
           doc,
           title: 'HIGH-YIELD SYNTHESIS & CLINICAL THEMES',
-          markdownContent: knowledgeMap.documentSummary,
+          markdown: knowledgeMap.documentSummary,
           margin,
           indent: 0,
           contentWidth,
@@ -1086,7 +1052,7 @@ export function KnowledgePdfExportModal({
           currentY = renderPdfRichCard({
             doc,
             title: 'Clinical Pathway & Explanation:',
-            markdownContent: node.explanation.standard,
+            markdown: node.explanation.standard,
             margin,
             indent,
             contentWidth,
@@ -1109,7 +1075,7 @@ export function KnowledgePdfExportModal({
           currentY = renderPdfRichCard({
             doc,
             title: 'First-Principles Derivation:',
-            markdownContent: node.explanation.firstPrinciples,
+            markdown: node.explanation.firstPrinciples,
             margin,
             indent,
             contentWidth,
@@ -1129,10 +1095,15 @@ export function KnowledgePdfExportModal({
 
         // User Personal Notes
         if (includeUserNotes && node.explanation?.userNotes) {
-          currentY = renderPdfRichCard({
+          const unRaw = stripMarkdown(node.explanation.userNotes);
+          doc.setFont('NotoSans', 'normal');
+          doc.setFontSize(7.8);
+          const unLines = doc.splitTextToSize(unRaw, contentWidth - indent - 8);
+
+          currentY = renderPdfCard({
             doc,
             title: 'Personal Study Notes:',
-            markdownContent: node.explanation.userNotes,
+            lines: unLines,
             margin,
             indent,
             contentWidth,
