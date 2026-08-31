@@ -43,6 +43,7 @@ interface FollowUpChatProps {
   onAskFollowUp: (question: string, images?: string[]) => Promise<void>;
   onStop?: () => void;
   isLoading?: boolean;
+  inputPrompt?: string;
   streamingText?: string;
   streamingThought?: string;
   title?: string;
@@ -57,6 +58,7 @@ export function FollowUpChat({
   onAskFollowUp,
   onStop,
   isLoading = false,
+  inputPrompt = '',
   streamingText = '',
   streamingThought = '',
   title = 'Clinical Inquiries & Case Consultation',
@@ -452,10 +454,12 @@ export function FollowUpChat({
 
             <AiStreamingRawLogBox
               isLoading={isLoading}
+              inputPrompt={inputPrompt}
               streamText={streamingText}
               thinkingText={streamingThought}
               currentStep="Preceptor AI synthesizing evidence & answering follow-up..."
               title="Clinical Inquiry Live Reasoning & Synthesis"
+              permanent={true}
               onStop={onStop}
               defaultExpanded={true}
               defaultThinkingExpanded={true}

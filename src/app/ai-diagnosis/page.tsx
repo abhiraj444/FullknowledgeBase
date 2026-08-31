@@ -93,9 +93,11 @@ function AiDiagnosisContent() {
   const [structuredQuestion, setStructuredQuestion] = useState<StructuredQuestion | null>(null);
   const [currentCaseId, setCurrentCaseId] = useState<string | null>(null);
   const [progressStep, setProgressStep] = useState(0);
+  const [streamingInputPrompt, setStreamingInputPrompt] = useState<string>('');
   const [streamingThought, setStreamingThought] = useState<string>('');
   const [streamingText, setStreamingText] = useState<string>('');
   const [streamingStatus, setStreamingStatus] = useState<string>('');
+  const [followUpStreamInputPrompt, setFollowUpStreamInputPrompt] = useState<string>('');
   const [followUpStreamText, setFollowUpStreamText] = useState<string>('');
   const [followUpStreamThought, setFollowUpStreamThought] = useState<string>('');
   const [thinkingProcess, setThinkingProcess] = useState<string | undefined>(undefined);
@@ -470,6 +472,7 @@ function AiDiagnosisContent() {
     abortControllerRef.current = controller;
     setIsLoading(true);
     setErrorMessage(null);
+    setStreamingInputPrompt('');
     setStreamingThought('');
     setStreamingText('');
     setStreamingStatus('Initiating clinical analysis...');
@@ -497,6 +500,9 @@ function AiDiagnosisContent() {
           language,
           audienceMode,
           signal: controller.signal,
+          onStreamChunk: (payload) => {
+            if (payload.promptSent) setStreamingInputPrompt(payload.promptSent);
+          },
           callbacks: {
             onThoughtChunk: (_chunk, fullThought) => setStreamingThought(fullThought),
             onTextChunk: (_chunk, fullText) => {
@@ -594,6 +600,7 @@ function AiDiagnosisContent() {
     const controller = new AbortController();
     followUpAbortControllerRef.current = controller;
     setIsAskingFollowUp(true);
+    setFollowUpStreamInputPrompt('');
     setFollowUpStreamText('');
     setFollowUpStreamThought('');
     try {
@@ -618,6 +625,7 @@ function AiDiagnosisContent() {
           images,
           signal: controller.signal,
           onStreamChunk: (payload) => {
+            if (payload.promptSent) setFollowUpStreamInputPrompt(payload.promptSent);
             if (payload.text) setFollowUpStreamText(payload.text);
             if (payload.thinking) setFollowUpStreamThought(payload.thinking);
           },
@@ -1257,6 +1265,7 @@ function AiDiagnosisContent() {
                   {/* The Live Clinical Reasoning & Stream Console */}
                   <AiStreamingRawLogBox
                     isLoading={isLoading || isAnalyzingReport}
+                    inputPrompt={streamingInputPrompt}
                     streamText={streamingText}
                     thinkingText={streamingThought || thinkingProcess || ''}
                     currentStep={streamingStatus || PROGRESS_MESSAGES[progressStep] || 'Synthesizing clinical evidence...'}
@@ -1264,6 +1273,7 @@ function AiDiagnosisContent() {
                     activeStepIndex={progressStep}
                     onStop={handleStopAnalysis}
                     title="Live Clinical Reasoning & Evidence Synthesis"
+                    permanent={true}
                     defaultExpanded={isLoading || isAnalyzingReport}
                     defaultThinkingExpanded={true}
                     defaultRawExpanded={false}
@@ -1411,6 +1421,7 @@ function AiDiagnosisContent() {
                   onAskFollowUp={handleAskFollowUp}
                   onStop={handleStopFollowUp}
                   isLoading={isAskingFollowUp}
+                  inputPrompt={followUpStreamInputPrompt}
                   streamingText={followUpStreamText}
                   streamingThought={followUpStreamThought}
                   title="Clinical Blind Spots & Interactive Q&A"

@@ -745,6 +745,7 @@ export interface StreamChunkCallbackPayload {
     thinking?: string;
     isDone: boolean;
     modelUsed?: string;
+    promptSent?: string;
 }
 
 /**
@@ -791,6 +792,17 @@ export async function executeStreamingAiPrompt(
 
     let accumulatedText = '';
     let accumulatedThinking = '';
+
+    // Emit initial event with promptSent for instant UI feedback
+    if (onChunk) {
+        onChunk({
+            text: '',
+            thinking: '',
+            isDone: false,
+            promptSent: prompt,
+            modelUsed: config.customModel || config.geminiModel || 'Gemini',
+        });
+    }
 
     if (typeof window !== 'undefined') {
         try {
@@ -857,6 +869,7 @@ export async function executeStreamingAiPrompt(
                                 thinking: accumulatedThinking,
                                 isDone: !!parsed.done,
                                 modelUsed: parsed.modelUsed,
+                                promptSent: prompt,
                             });
                         }
                     } catch (parseErr: any) {
@@ -872,6 +885,7 @@ export async function executeStreamingAiPrompt(
                     text: accumulatedText,
                     thinking: accumulatedThinking,
                     isDone: true,
+                    promptSent: prompt,
                 });
             }
 
@@ -906,7 +920,7 @@ export async function executeStreamingAiPrompt(
     const fallbackRaw = await executeAiPrompt(config, prompt, images, options);
     const { cleanText: fallbackClean, thinking: fallbackThinking } = stripThinkingTags(fallbackRaw);
     if (onChunk) {
-        onChunk({ text: fallbackClean, thinking: fallbackThinking, isDone: true });
+        onChunk({ text: fallbackClean, thinking: fallbackThinking, isDone: true, promptSent: prompt });
     }
     return { text: fallbackClean, thinking: fallbackThinking };
 }

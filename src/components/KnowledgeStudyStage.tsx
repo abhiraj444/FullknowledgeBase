@@ -43,6 +43,7 @@ interface KnowledgeStudyStageProps {
   onStop?: () => void;
   isExplaining?: boolean;
   isDissecting?: boolean;
+  streamInputPrompt?: string;
   streamThinking?: string;
   streamText?: string;
   streamStep?: string;
@@ -61,6 +62,7 @@ export function KnowledgeStudyStage({
   onStop,
   isExplaining = false,
   isDissecting = false,
+  streamInputPrompt = '',
   streamThinking = '',
   streamText = '',
   streamStep = '',
@@ -275,15 +277,26 @@ export function KnowledgeStudyStage({
 
       {/* Active Tab Body Stage */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-        {/* Streaming Thinking Process Logs when Generating */}
-        {(isExplaining || isDissecting) && (
+        {/* 3-Box AI Request, Reasoning & Stream Inspector */}
+        {(isExplaining || isDissecting || Boolean(streamThinking || streamText || streamInputPrompt)) && (
           <AiStreamingRawLogBox
-            currentStep={streamStep || (isDissecting ? 'Dissecting into granular subtopics...' : 'Analyzing concept via surgical context...')}
+            title={isDissecting ? 'AI Dissection Console (Subtopic Expansion)' : 'AI Academic Workup Console'}
+            currentStep={
+              streamStep ||
+              (isDissecting
+                ? 'Dissecting into granular subtopics...'
+                : isExplaining
+                ? 'Analyzing concept via surgical context...'
+                : 'AI response ready.')
+            }
+            inputPrompt={streamInputPrompt}
             thinkingText={streamThinking}
             streamText={streamText}
             modelName={streamModelName}
-            isStreaming={true}
+            isLoading={isExplaining || isDissecting}
             onStop={onStop}
+            permanent={true}
+            defaultExpanded={isExplaining || isDissecting}
           />
         )}
 

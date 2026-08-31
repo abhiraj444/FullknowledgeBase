@@ -136,6 +136,7 @@ export function SlideEditor({
   const [isSuggestingTopics, setIsSuggestingTopics] = useState(false);
   const [isPresenting, setIsPresenting] = useState(false);
   const [presentingIndex, setPresentingIndex] = useState(0);
+  const [streamInputPrompt, setStreamInputPrompt] = useState('');
   const [streamText, setStreamText] = useState('');
   const [streamThinking, setStreamThinking] = useState('');
   const [streamStep, setStreamStep] = useState('');
@@ -218,6 +219,7 @@ export function SlideEditor({
     const controller = new AbortController();
     slideModifyAbortRef.current = controller;
     setIsModifying(true);
+    setStreamInputPrompt('');
     setStreamText('');
     setStreamThinking('');
     const slideNums = selectedIndices.map((i) => `#${i + 1}`).join(', ');
@@ -238,6 +240,7 @@ export function SlideEditor({
         audienceMode,
         signal: controller.signal,
         onStreamChunk: (payload) => {
+          if (payload.promptSent) setStreamInputPrompt(payload.promptSent);
           if (payload.text !== undefined) setStreamText(payload.text);
           if (payload.thinking !== undefined) setStreamThinking(payload.thinking);
           if (payload.model) setStreamModelName(payload.model);
@@ -273,6 +276,7 @@ export function SlideEditor({
     const controller = new AbortController();
     slideModifyAbortRef.current = controller;
     setIsModifying(true);
+    setStreamInputPrompt('');
     setStreamText('');
     setStreamThinking('');
     const slideTitle = slides[slideIndex]?.title || `#${slideIndex + 1}`;
@@ -292,6 +296,7 @@ export function SlideEditor({
         audienceMode,
         signal: controller.signal,
         onStreamChunk: (payload) => {
+          if (payload.promptSent) setStreamInputPrompt(payload.promptSent);
           if (payload.text !== undefined) setStreamText(payload.text);
           if (payload.thinking !== undefined) setStreamThinking(payload.thinking);
           if (payload.model) setStreamModelName(payload.model);
@@ -920,12 +925,14 @@ export function SlideEditor({
           {/* Collapsible Live AI Streaming & Raw Output Box */}
           <AiStreamingRawLogBox
             isLoading={isModifying || isSuggestingTopics}
+            inputPrompt={streamInputPrompt}
             streamText={streamText}
             thinkingText={streamThinking}
             currentStep={streamStep}
             modelName={streamModelName || formatModelDisplayName(activeModel || aiConfig?.customModel || aiConfig?.geminiModel)}
             onStop={handleStopSlideModify}
             title="Slide AI Synthesis & Streaming Output"
+            permanent={true}
             className="mb-4"
           />
 

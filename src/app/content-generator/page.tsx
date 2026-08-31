@@ -82,8 +82,10 @@ function ContentGeneratorContent() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Streaming & Thinking process states
+  const [streamInputPrompt, setStreamInputPrompt] = useState<string>('');
   const [streamThinking, setStreamThinking] = useState<string>('');
   const [streamText, setStreamText] = useState<string>('');
+  const [followUpStreamInputPrompt, setFollowUpStreamInputPrompt] = useState<string>('');
   const [followUpStreamText, setFollowUpStreamText] = useState<string>('');
   const [followUpStreamThought, setFollowUpStreamThought] = useState<string>('');
   const [streamStep, setStreamStep] = useState<string>('');
@@ -456,7 +458,8 @@ function ContentGeneratorContent() {
     });
   };
 
-  const handleQuestionStreamChunk = (payload: { thinking?: string; text?: string; step?: string; model?: string }) => {
+  const handleQuestionStreamChunk = (payload: { thinking?: string; text?: string; step?: string; model?: string; promptSent?: string }) => {
+    if (payload.promptSent) setStreamInputPrompt(payload.promptSent);
     if (payload.thinking) setStreamThinking(payload.thinking);
     if (payload.model) setStreamModelName(formatModelDisplayName(payload.model));
     if (payload.step) setStreamStep(payload.step);
@@ -483,14 +486,16 @@ function ContentGeneratorContent() {
     }
   };
 
-  const handleOutlineStreamChunk = (payload: { thinking?: string; text?: string; step?: string; model?: string }) => {
+  const handleOutlineStreamChunk = (payload: { thinking?: string; text?: string; step?: string; model?: string; promptSent?: string }) => {
+    if (payload.promptSent) setStreamInputPrompt(payload.promptSent);
     if (payload.thinking) setStreamThinking(payload.thinking);
     if (payload.model) setStreamModelName(formatModelDisplayName(payload.model));
     if (payload.step) setStreamStep(payload.step);
     if (payload.text) setStreamText(payload.text);
   };
 
-  const handleSlideStreamChunk = (payload: { thinking?: string; text?: string; step?: string; model?: string }) => {
+  const handleSlideStreamChunk = (payload: { thinking?: string; text?: string; step?: string; model?: string; promptSent?: string }) => {
+    if (payload.promptSent) setStreamInputPrompt(payload.promptSent);
     if (payload.thinking) setStreamThinking(payload.thinking);
     if (payload.model) setStreamModelName(formatModelDisplayName(payload.model));
     if (payload.step) setStreamStep(payload.step);
@@ -834,6 +839,7 @@ function ContentGeneratorContent() {
     const controller = new AbortController();
     followUpAbortControllerRef.current = controller;
     setIsAskingFollowUp(true);
+    setFollowUpStreamInputPrompt('');
     setFollowUpStreamText('');
     setFollowUpStreamThought('');
     try {
@@ -853,6 +859,7 @@ function ContentGeneratorContent() {
         audienceMode,
         signal: controller.signal,
         onStreamChunk: (payload) => {
+          if (payload.promptSent) setFollowUpStreamInputPrompt(payload.promptSent);
           if (payload.text) setFollowUpStreamText(payload.text);
           if (payload.thinking) setFollowUpStreamThought(payload.thinking);
         },
@@ -1373,15 +1380,17 @@ function ContentGeneratorContent() {
               <span>Stop Request</span>
             </Button>
           </Card>
-          {(isLoading || streamThinking || streamText) && (
+          {(isLoading || streamThinking || streamText || streamInputPrompt) && (
             <ClinicalThinkingBox
               isLoading={isLoading}
+              inputPrompt={streamInputPrompt}
               thinkingText={streamThinking}
               streamText={streamText}
               currentStep={streamStep || 'Consultant AI analyzing clinical guidelines & generating content...'}
               activeStepIndex={activeStepIndex}
               modelName={streamModelName}
               title="Clinical AI Live Reasoning & Evidence Synthesis"
+              permanent={true}
               onStop={handleStopCurrentRequest}
             />
           )}
@@ -1427,16 +1436,18 @@ function ContentGeneratorContent() {
               )}
 
               {/* Live Streaming & Thinking for Outline or Slide Generation */}
-              {(isLoading || streamThinking || streamText) && (
+              {(isLoading || streamThinking || streamText || streamInputPrompt) && (
                 <div className="pt-2">
                   <ClinicalThinkingBox
                     isLoading={isLoading}
+                    inputPrompt={streamInputPrompt}
                     thinkingText={streamThinking}
                     streamText={streamText}
                     currentStep={streamStep || 'Synthesizing postgraduate slides & structured evidence...'}
                     activeStepIndex={activeStepIndex}
                     modelName={streamModelName}
-                    title="Live Clinical Reasoning &amp; Evidence Synthesis"
+                    title="Live Clinical Reasoning & Evidence Synthesis"
+                    permanent={true}
                     onStop={handleStopCurrentRequest}
                     defaultExpanded={isLoading}
                     defaultThinkingExpanded={true}
@@ -1581,6 +1592,7 @@ function ContentGeneratorContent() {
             onAskFollowUp={handleAskFollowUp}
             onStop={handleStopFollowUp}
             isLoading={isAskingFollowUp}
+            inputPrompt={followUpStreamInputPrompt}
             streamingText={followUpStreamText}
             streamingThought={followUpStreamThought}
             title="Clinical Inquiries & Q&A"

@@ -102,6 +102,7 @@ function KnowledgeMapContent() {
   const [isInputExpanded, setIsInputExpanded] = useState(true);
 
   // Streaming Raw Logs State
+  const [streamInputPrompt, setStreamInputPrompt] = useState('');
   const [streamStep, setStreamStep] = useState('');
   const [streamThinking, setStreamThinking] = useState('');
   const [streamText, setStreamText] = useState('');
@@ -234,6 +235,7 @@ function KnowledgeMapContent() {
 
     setIsGenerating(true);
     setStreamStep('Ingesting content & constructing hierarchical knowledge tree...');
+    setStreamInputPrompt('');
     setStreamThinking('');
     setStreamText('');
     setStreamModelName(formatModelDisplayName(activeModel));
@@ -267,6 +269,7 @@ function KnowledgeMapContent() {
           language,
           audienceMode,
           onStreamChunk: (chunk) => {
+            if (chunk.promptSent) setStreamInputPrompt(chunk.promptSent);
             if (chunk.thinking) setStreamThinking(chunk.thinking);
             if (chunk.text) setStreamText(chunk.text);
             if (chunk.modelUsed) setStreamModelName(formatModelDisplayName(chunk.modelUsed));
@@ -346,6 +349,7 @@ function KnowledgeMapContent() {
     abortControllerRef.current = new AbortController();
     setIsDissectingNodeId(node.id);
     setStreamStep(`Dissecting "${node.title}" into granular sub-principles...`);
+    setStreamInputPrompt('');
     setStreamThinking('');
     setStreamText('');
     setStreamModelName(formatModelDisplayName(activeModel));
@@ -365,6 +369,7 @@ function KnowledgeMapContent() {
           language,
           audienceMode,
           onStreamChunk: (chunk) => {
+            if (chunk.promptSent) setStreamInputPrompt(chunk.promptSent);
             if (chunk.thinking) setStreamThinking(chunk.thinking);
             if (chunk.text) setStreamText(chunk.text);
             if (chunk.modelUsed) setStreamModelName(formatModelDisplayName(chunk.modelUsed));
@@ -423,6 +428,7 @@ function KnowledgeMapContent() {
     };
 
     setStreamStep(`Deriving ${modeLabels[mode]} for "${node.title}"...`);
+    setStreamInputPrompt('');
     setStreamThinking('');
     setStreamText('');
     setStreamModelName(formatModelDisplayName(activeModel));
@@ -443,6 +449,7 @@ function KnowledgeMapContent() {
           language,
           audienceMode,
           onStreamChunk: (chunk) => {
+            if (chunk.promptSent) setStreamInputPrompt(chunk.promptSent);
             if (chunk.thinking) setStreamThinking(chunk.thinking);
             if (chunk.text) setStreamText(chunk.text);
             if (chunk.modelUsed) setStreamModelName(formatModelDisplayName(chunk.modelUsed));
@@ -863,15 +870,34 @@ function KnowledgeMapContent() {
         </Card>
       )}
 
-      {/* Streaming Thinking Process Box during generation */}
-      {isGenerating && (
+      {/* 3-Box AI Request, Reasoning & Stream Inspector (Persistent Console) */}
+      {(isGenerating || Boolean(isDissectingNodeId) || Boolean(isExplainingNodeId) || Boolean(streamText || streamThinking || streamInputPrompt)) && (
         <AiStreamingRawLogBox
-          currentStep={streamStep || 'Constructing hierarchical knowledge tree...'}
+          title={
+            isDissectingNodeId
+              ? 'AI Dissection Console (Subtopic Expansion)'
+              : isExplainingNodeId
+              ? 'AI First-Principles Explanation Console'
+              : 'Knowledge Tree Synthesis & Stream Console'
+          }
+          currentStep={
+            streamStep ||
+            (isGenerating
+              ? 'Constructing hierarchical knowledge tree...'
+              : isDissectingNodeId
+              ? 'Dissecting subtopic principles...'
+              : isExplainingNodeId
+              ? 'Deriving academic & clinical explanation...'
+              : 'Knowledge synthesis ready.')
+          }
+          inputPrompt={streamInputPrompt}
           thinkingText={streamThinking}
           streamText={streamText}
           modelName={streamModelName}
-          isStreaming={true}
+          isLoading={isGenerating || Boolean(isDissectingNodeId) || Boolean(isExplainingNodeId)}
           onStop={handleStopGeneration}
+          permanent={true}
+          defaultExpanded={isGenerating || Boolean(isDissectingNodeId) || Boolean(isExplainingNodeId)}
         />
       )}
 
@@ -1021,6 +1047,7 @@ function KnowledgeMapContent() {
                 onStop={handleStopGeneration}
                 isExplaining={Boolean(isExplainingNodeId && isExplainingNodeId === activeNodeId)}
                 isDissecting={Boolean(isDissectingNodeId && isDissectingNodeId === activeNodeId)}
+                streamInputPrompt={streamInputPrompt}
                 streamThinking={streamThinking}
                 streamText={streamText}
                 streamStep={streamStep}

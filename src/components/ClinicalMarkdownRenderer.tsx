@@ -68,27 +68,31 @@ function extractReadableContent(raw: string): string {
 }
 
 /**
- * Normalizes biomedical notation and escapes so KaTeX and Markdown render cleanly.
+ * Normalizes biomedical notation, LaTeX delimiters, and escapes so KaTeX and Markdown render cleanly.
  */
 function normalizeBiomedicalNotation(raw: string): string {
   if (!raw) return '';
 
-  return raw
-    // Normalize unescaped double-backslashes from JSON decoding
-    .replace(/\\\\([a-zA-Z]+)/g, '\\$1')
-    // Support common clinical arrow and degree symbols inside or outside math
+  let text = raw;
+
+  // 1. Normalize unescaped double-backslashes from JSON string serialization (e.g. \\frac -> \frac)
+  text = text.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
+
+  // 2. Convert standard LaTeX display math \[ ... \] into $$ ... $$
+  text = text.replace(/\\\[([\s\S]*?)\\\]/g, '\n\n$$$$1$$\n\n');
+
+  // 3. Convert standard LaTeX inline math \( ... \) into $ ... $
+  text = text.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$');
+
+  // 4. Support common clinical/biomedical arrows and degree shorthand outside math
+  text = text
     .replace(/\\uparrow\b/g, '↑')
     .replace(/\\downarrow\b/g, '↓')
     .replace(/\\rightarrow\b/g, '→')
     .replace(/\\leftarrow\b/g, '←')
-    .replace(/\\Delta\b/g, 'Δ')
-    .replace(/\\degree\b/g, '°')
-    .replace(/\\circ\b/g, '°')
-    .replace(/\\pm\b/g, '±')
-    .replace(/\\ge\b/g, '≥')
-    .replace(/\\le\b/g, '≤')
-    .replace(/\\times\b/g, '×')
-    .replace(/\\cdot\b/g, '·');
+    .replace(/\\degree\b/g, '°');
+
+  return text;
 }
 
 export function ClinicalMarkdownRenderer({ content, className = '' }: ClinicalMarkdownRendererProps) {
@@ -101,7 +105,21 @@ export function ClinicalMarkdownRenderer({ content, className = '' }: ClinicalMa
     <div className={`prose prose-sm dark:prose-invert max-w-none break-words font-sans ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
+        rehypePlugins={[
+          [
+            rehypeKatex,
+            {
+              throwOnError: false,
+              strict: false,
+              trust: true,
+              macros: {
+                '\\odot': '\\odot',
+                '\\oplus': '\\oplus',
+                '\\degree': '^{\\circ}',
+              },
+            },
+          ],
+        ]}
         components={{
           h1: ({ children }) => (
             <h1 className="text-base sm:text-lg font-bold text-foreground mt-3 mb-1.5 border-b border-border pb-1">
