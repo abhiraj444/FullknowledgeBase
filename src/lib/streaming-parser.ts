@@ -561,27 +561,297 @@ export function extractProgressiveDiagnosis(rawText: string): {
 }
 
 /**
- * Extracts progressive Slide objects from a streaming JSON string as they are generated in real-time.
+ * Parses markdown table syntax (| col1 | col2 |\n| --- | --- |\n| val1 | val2 |) into TableContent
+ */
+function parseMarkdownTable(tableBlock: string): TableContent | null {
+  const lines = tableBlock.trim().split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length < 2) return null;
+
+  const parseRow = (line: string) => {
+    return line
+      .replace(/^\|/, '')
+      .replace(/\|$/, '')
+      .split('|')
+      .map((c) => c.trim());
+  };
+
+  const headers = parseRow(lines[0]);
+  let rowStartIndex = 1;
+  // Check if second line is a delimiter like |---|---|
+  if (lines.length > 1 && /^\|?[\s-:]+\|[\s-:|]+$/.test(lines[1])) {
+    rowStartIndex = 2;
+  }
+
+  const rows: TableRowContent[] = [];
+  for (let i = rowStartIndex; i < lines.length; i++) {
+    const cells = parseRow(lines[i]);
+    if (cells.length > 0) {
+      while (cells.length < headers.length) cells.push('');
+      rows.push({ cells: cells.slice(0, headers.length) });
+    }
+  }
+
+  if (headers.length > 0 && rows.length > 0) {
+    return {
+      type: 'table',
+      headers,
+      rows,
+    };
+  }
+  return null;
+}
+
+/**
+ * Extracts bold terms enclosed in **term**
+ */
+function extractBoldStrings(text: string): string[] {
+  const bold: string[] = [];
+  const regex = /\*\*(.*?)\*\*/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    if (match[1] && match[1].trim()) {
+      bold.push(match[1].trim());
+    }
+  }
+  return bold;
+}
+
+/**
+ * Parses structured Markdown slide text into Slide objects.
+ * Supports # Slide: Title, **Summary:**, bullet lists, numbered lists, markdown tables, notes (>), pearls, and questions.
+ */
+export function parseMarkdownToSlides(markdown: string): Slide[] {
+  if (!markdown || !markdown.trim()) return [];
+
+  const { cleanText } = stripThinkingTags(markdown);
+  const text = cleanText.trim();
+
+  // Split into slides by '---' divider, or '# Slide', or '## Slide'
+  let slideChunks: string[] = [];
+  if (text.includes('---')) {
+    slideChunks = text.split(/\n\s*---\s*\n/).filter((c) => c.trim().length > 0);
+  } else if (/^#+\s*Slide/im.test(text)) {
+    slideChunks = text.split(/(?=^#+\s*Slide)/im).filter((c) => c.trim().length > 0);
+  } else if (/^#\s+/m.test(text)) {
+    slideChunks = text.split(/(?=^#\s+)/m).filter((c) => c.trim().length > 0);
+  } else {
+    slideChunks = [text];
+  }
+
+  const slides: Slide[] = [];
+
+  for (const chunk of slideChunks) {
+    const lines = chunk.trim().split('\n');
+    if (lines.length === 0) continue;
+
+    let title = '';
+    let summary = '';
+    const pearls: string[] = [];
+    const questions: string[] = [];
+    const content: ContentItem[] = [];
+
+    let currentSection: 'header' | 'content' | 'pearls' | 'questions' = 'content';
+    let currentBulletItems: { text: string; bold: string[] }[] = [];
+    let currentNumberedItems: { text: string; bold: string[] }[] = [];
+    let currentTableLines: string[] = [];
+
+    const flushListsAndTables = () => {
+      if (currentBulletItems.length > 0) {
+        content.push({
+          type: 'bullet_list',
+          items: [...currentBulletItems],
+        });
+        currentBulletItems = [];
+      }
+      if (currentNumberedItems.length > 0) {
+        content.push({
+          type: 'numbered_list',
+          items: [...currentNumberedItems],
+        });
+        currentNumberedItems = [];
+      }
+      if (currentTableLines.length > 0) {
+        const table = parseMarkdownTable(currentTableLines.join('\n'));
+        if (table) content.push(table);
+        currentTableLines = [];
+      }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) {
+        flushListsAndTables();
+        continue;
+      }
+
+      // Title detection
+      if (!title && /^#+\s*(?:Slide\s*\d*[:\-]?\s*)?(.*)$/i.test(line)) {
+        const tMatch = line.match(/^#+\s*(?:Slide\s*\d*[:\-]?\s*)?(.*)$/i);
+        if (tMatch && tMatch[1]) {
+          title = tMatch[1].replace(/^\*\*|\*\*$/g, '').trim();
+          continue;
+        }
+      }
+
+      // Summary detection
+      if (/^\*{0,2}Summary\*{0,2}[:\-]/i.test(line)) {
+        summary = line.replace(/^\*{0,2}Summary\*{0,2}[:\-]\s*/i, '').replace(/^\*\*|\*\*$/g, '').trim();
+        continue;
+      }
+      if (/^#+\s*Summary/i.test(line)) {
+        if (i + 1 < lines.length && lines[i + 1].trim() && !lines[i + 1].startsWith('#')) {
+          summary = lines[i + 1].trim();
+          i++;
+        }
+        continue;
+      }
+
+      // Section switches
+      if (/^#+\s*(?:Clinical\s*)?Pearls|^\*{0,2}Pearls\*{0,2}[:\-]/i.test(line)) {
+        flushListsAndTables();
+        currentSection = 'pearls';
+        continue;
+      }
+      if (/^#+\s*(?:Proactive\s*|Viva\s*)?Questions|^\*{0,2}Questions\*{0,2}[:\-]/i.test(line)) {
+        flushListsAndTables();
+        currentSection = 'questions';
+        continue;
+      }
+      if (/^#+\s*(?:Content|Key\s*Concepts|Mechanisms|Analysis)/i.test(line)) {
+        flushListsAndTables();
+        currentSection = 'content';
+        continue;
+      }
+
+      // If in pearls section
+      if (currentSection === 'pearls') {
+        if (/^[-*]\s+/.test(line) || /^\d+[\.\)]\s+/.test(line)) {
+          const itemText = line.replace(/^[-*]\s+/, '').replace(/^\d+[\.\)]\s+/, '').trim();
+          if (itemText) pearls.push(itemText);
+        } else if (line.startsWith('#')) {
+          currentSection = 'content';
+        } else {
+          pearls.push(line);
+        }
+        continue;
+      }
+
+      // If in questions section
+      if (currentSection === 'questions') {
+        if (/^[-*]\s+/.test(line) || /^\d+[\.\)]\s+/.test(line) || /^Q\d*[:\-]\s*/i.test(line)) {
+          const qText = line.replace(/^[-*]\s+/, '').replace(/^\d+[\.\)]\s+/, '').replace(/^Q\d*[:\-]\s*/i, '').trim();
+          if (qText) questions.push(qText);
+        } else if (line.startsWith('#')) {
+          currentSection = 'content';
+        } else {
+          questions.push(line);
+        }
+        continue;
+      }
+
+      // Content section parsing: table line
+      if (line.startsWith('|')) {
+        if (currentBulletItems.length > 0 || currentNumberedItems.length > 0) {
+          flushListsAndTables();
+        }
+        currentTableLines.push(line);
+        continue;
+      } else if (currentTableLines.length > 0) {
+        flushListsAndTables();
+      }
+
+      // Bullet list
+      if (/^[-*]\s+/.test(line)) {
+        if (currentNumberedItems.length > 0) flushListsAndTables();
+        const itemText = line.replace(/^[-*]\s+/, '').trim();
+        currentBulletItems.push({
+          text: itemText,
+          bold: extractBoldStrings(itemText),
+        });
+        continue;
+      }
+
+      // Numbered list
+      if (/^\d+[\.\)]\s+/.test(line)) {
+        if (currentBulletItems.length > 0) flushListsAndTables();
+        const itemText = line.replace(/^\d+[\.\)]\s+/, '').trim();
+        currentNumberedItems.push({
+          text: itemText,
+          bold: extractBoldStrings(itemText),
+        });
+        continue;
+      }
+
+      // Note / Blockquote
+      if (line.startsWith('>')) {
+        flushListsAndTables();
+        const noteText = line.replace(/^>\s*/, '').trim();
+        content.push({
+          type: 'note',
+          text: noteText,
+        });
+        continue;
+      }
+
+      // Regular paragraph or heading line
+      flushListsAndTables();
+      const cleanPara = line.replace(/^#+\s*/, '').trim();
+      if (cleanPara) {
+        content.push({
+          type: 'paragraph',
+          text: cleanPara,
+          bold: extractBoldStrings(cleanPara),
+        });
+      }
+    }
+
+    flushListsAndTables();
+
+    if (title || content.length > 0) {
+      slides.push({
+        title: title || `Slide ${slides.length + 1}`,
+        content,
+        summary,
+        clinicalPearls: pearls,
+        proactiveQuestions: questions,
+      });
+    }
+  }
+
+  return slides;
+}
+
+/**
+ * Extracts progressive Slide objects from streaming text (supporting BOTH structured Markdown AND JSON).
  * Uses a multi-tiered extraction strategy:
- * 1. Array repair & parse
- * 2. Per-slide bracket balancing scanner for completed and currently active slides
+ * 1. Structured Markdown parser (primary for low-token, high-speed streaming)
+ * 2. Array repair & JSON parse
+ * 3. Per-slide bracket balancing scanner for streaming JSON
  */
 export function extractProgressiveSlides(rawText: string): Slide[] {
   if (!rawText || rawText.trim().length === 0) return [];
 
   let text = rawText.trim();
   if (text.startsWith('```')) {
-    text = text.replace(/^```(?:json)?\s*/i, '');
+    text = text.replace(/^```(?:json|markdown|md)?\s*/i, '');
     const endFence = text.lastIndexOf('```');
     if (endFence !== -1) {
       text = text.substring(0, endFence).trim();
     }
   }
 
+  // Tier 1: Try Structured Markdown parser first (if text has markdown headers or list markers without being a strict JSON array)
+  if (!text.startsWith('[') && (text.includes('# Slide') || text.includes('# ') || text.includes('---') || text.includes('**Summary:**'))) {
+    const mdSlides = parseMarkdownToSlides(text);
+    if (mdSlides.length > 0 && mdSlides.some((s) => s.content && s.content.length > 0)) {
+      return mdSlides;
+    }
+  }
+
   const slides: Slide[] = [];
   const seenTitles = new Set<string>();
 
-  // Tier 1: Try parsing full/repaired JSON array
+  // Tier 2: Try parsing full/repaired JSON array
   try {
     const parsed = parseAiJson<Slide[]>(text, []);
     if (Array.isArray(parsed) && parsed.length > 0) {
@@ -604,15 +874,13 @@ export function extractProgressiveSlides(rawText: string): Slide[] {
     }
   } catch {}
 
-  // Tier 2: Per-Slide Bracket Balancing Scanner
-  // Finds each slide object candidate starting with `{"title"` or containing `"title":`
+  // Tier 3: Per-Slide Bracket Balancing Scanner (for in-flight streaming JSON)
   try {
     let searchIdx = 0;
     while (searchIdx < text.length) {
       const titleKeyIdx = text.indexOf('"title"', searchIdx);
       if (titleKeyIdx === -1) break;
 
-      // Backtrack to the opening `{` for this slide object
       let objStart = -1;
       for (let i = titleKeyIdx; i >= 0; i--) {
         if (text[i] === '{') {
@@ -626,7 +894,6 @@ export function extractProgressiveSlides(rawText: string): Slide[] {
         continue;
       }
 
-      // Walk forward to find matching `}` or stream tail
       let depth = 0;
       let inStr = false;
       let isEsc = false;
@@ -655,7 +922,6 @@ export function extractProgressiveSlides(rawText: string): Slide[] {
         }
       }
 
-      // If object hasn't closed yet (it's actively streaming!), take up to the end of string
       const rawSlideObj = objEnd !== -1 ? text.substring(objStart, objEnd) : text.substring(objStart);
       const repaired = repairJsonString(rawSlideObj);
 
@@ -679,6 +945,12 @@ export function extractProgressiveSlides(rawText: string): Slide[] {
       searchIdx = objEnd !== -1 ? objEnd : text.length;
     }
   } catch {}
+
+  // Tier 4: Fallback to markdown parser if JSON yielded nothing
+  if (slides.length === 0) {
+    const mdFallback = parseMarkdownToSlides(text);
+    if (mdFallback.length > 0) return mdFallback;
+  }
 
   return slides;
 }

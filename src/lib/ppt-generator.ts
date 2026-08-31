@@ -19,43 +19,87 @@ const TITLE_OPTIONS = {
 };
 
 /**
+ * Normalizes LaTeX math equations and symbols to clean, readable text/unicode for PowerPoint slides.
+ */
+export function cleanLatexForPptx(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, '$1')
+    .replace(/\$\s*([\s\S]*?)\s*\$/g, '$1')
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
+    .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
+    .replace(/\\text\{([^}]+)\}/g, '$1')
+    .replace(/\\mathbf\{([^}]+)\}/g, '$1')
+    .replace(/\\mathit\{([^}]+)\}/g, '$1')
+    .replace(/\\approx\b/g, '≈')
+    .replace(/\\Delta\b/g, 'Δ')
+    .replace(/\\pm\b/g, '±')
+    .replace(/\\times\b/g, '×')
+    .replace(/\\cdot\b/g, '·')
+    .replace(/\\le\b|\\leq\b/g, '≤')
+    .replace(/\\ge\b|\\geq\b/g, '≥')
+    .replace(/\\neq\b/g, '≠')
+    .replace(/\\propto\b/g, '∝')
+    .replace(/\\to\b|\\rightarrow\b/g, '→')
+    .replace(/\\leftarrow\b/g, '←')
+    .replace(/\\uparrow\b/g, '↑')
+    .replace(/\\downarrow\b/g, '↓')
+    .replace(/\\alpha\b/g, 'α')
+    .replace(/\\beta\b/g, 'β')
+    .replace(/\\gamma\b/g, 'γ')
+    .replace(/\\theta\b/g, 'θ')
+    .replace(/\\lambda\b/g, 'λ')
+    .replace(/\\mu\b/g, 'μ')
+    .replace(/\\pi\b/g, 'π')
+    .replace(/\\sigma\b/g, 'σ')
+    .replace(/\\omega\b/g, 'ω')
+    .replace(/\\Omega\b/g, 'Ω')
+    .replace(/\\sum\b/g, 'Σ')
+    .replace(/\\int\b/g, '∫')
+    .replace(/\\partial\b/g, '∂')
+    .replace(/\\degree\b|\\circ\b/g, '°');
+}
+
+/**
  * Formats text with bold parts into the array structure pptxgenjs requires for rich text.
- * Also supports standard markdown **bold** syntax.
+ * Also supports standard markdown **bold** syntax and converts LaTeX equations.
  */
 function formatTextForPptx(text: string, boldParts: string[] = []): PptxGenJS.TextProps[] {
   if (!text) return [{ text: '' }];
 
+  const cleanedText = cleanLatexForPptx(text);
+
   // 1. Check if markdown **bold** syntax is present
-  if (text.includes('**')) {
+  if (cleanedText.includes('**')) {
     const mdSegments: PptxGenJS.TextProps[] = [];
     const mdRegex = /\*\*(.*?)\*\*/g;
     let lastIdx = 0;
     let match: RegExpExecArray | null;
 
-    while ((match = mdRegex.exec(text)) !== null) {
+    while ((match = mdRegex.exec(cleanedText)) !== null) {
       if (match.index > lastIdx) {
-        mdSegments.push({ text: text.slice(lastIdx, match.index), options: { bold: false } });
+        mdSegments.push({ text: cleanedText.slice(lastIdx, match.index), options: { bold: false } });
       }
       mdSegments.push({ text: match[1], options: { bold: true } });
       lastIdx = match.index + match[0].length;
     }
-    if (lastIdx < text.length) {
-      mdSegments.push({ text: text.slice(lastIdx), options: { bold: false } });
+    if (lastIdx < cleanedText.length) {
+      mdSegments.push({ text: cleanedText.slice(lastIdx), options: { bold: false } });
     }
     return mdSegments;
   }
 
   // 2. Handle explicit boldParts array
   if (!boldParts || boldParts.length === 0) {
-    return [{ text }];
+    return [{ text: cleanedText }];
   }
 
   // Create a regex to find all bold parts. Escape special characters.
   const escapedBoldParts = boldParts.map((part) =>
-    part.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')
+    cleanLatexForPptx(part).replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')
   );
   const boldRegex = new RegExp(`(${escapedBoldParts.join('|')})`, 'g');
-  const parts = text.split(boldRegex);
+  const parts = cleanedText.split(boldRegex);
 
   return parts
     .filter((part) => part)
@@ -339,7 +383,7 @@ async function renderNote(
   slideTitle: string,
   virtualSlideElement: HTMLElement
 ) {
-  const cleanNote = (content.text || '').replace(/^Note:\s*/i, '');
+  const cleanNote = cleanLatexForPptx((content.text || '').replace(/^Note:\s*/i, ''));
   const htmlToMeasure = `<div style="width: 864px; font-size: 11pt; font-style: italic; margin: 0; padding: 4px; font-family: Inter, sans-serif;">Note: ${cleanNote}</div>`;
   const height = measureHeight(htmlToMeasure, virtualSlideElement) + 0.12;
 
@@ -366,6 +410,161 @@ async function renderNote(
   });
 
   return { newY: startY + height + 0.12, slide: slide };
+}
+
+async function renderSummaryBox(
+  pptx: PptxGenJS,
+  slide: PptxGenJS.Slide,
+  summary: string,
+  startY: number,
+  slideTitle: string,
+  virtualSlideElement: HTMLElement
+) {
+  if (!summary) return { newY: startY, slide };
+  const cleanSummary = cleanLatexForPptx(summary);
+  const richText = formatTextForPptx(cleanSummary);
+  const htmlToMeasure = `<div style="width: 864px; font-size: 11pt; font-style: italic; line-height: 1.35; margin: 0; padding: 4px; font-family: Inter, sans-serif;">${cleanSummary}</div>`;
+  const height = measureHeight(htmlToMeasure, virtualSlideElement) + 0.08;
+
+  if (startY + height > CONTENT_HEIGHT) {
+    slide = pptx.addSlide();
+    slide.addText(`${slideTitle} (cont.)`, {
+      ...TITLE_OPTIONS,
+      x: MARGIN_LEFT,
+      y: MARGIN_TOP,
+      w: CONTENT_WIDTH,
+    });
+    startY = MARGIN_TOP + TITLE_OPTIONS.h + 0.15;
+  }
+
+  slide.addText(richText, {
+    x: MARGIN_LEFT,
+    y: startY,
+    w: CONTENT_WIDTH,
+    h: height,
+    fontSize: 11,
+    italic: true,
+    color: '475569',
+    valign: 'top',
+  });
+
+  return { newY: startY + height + 0.1, slide };
+}
+
+async function renderPearlsBox(
+  pptx: PptxGenJS,
+  slide: PptxGenJS.Slide,
+  pearls: string[],
+  startY: number,
+  slideTitle: string,
+  virtualSlideElement: HTMLElement
+) {
+  if (!pearls || pearls.length === 0) return { newY: startY, slide };
+
+  const formattedItems = pearls.map((p) => `• ${cleanLatexForPptx(p)}`).join('\n');
+  const htmlToMeasure = `<div style="width: 864px; font-size: 10.5pt; line-height: 1.35; margin: 0; padding: 6px; font-family: Inter, sans-serif;"><strong>Pearls:</strong><br/>${formattedItems}</div>`;
+  const height = measureHeight(htmlToMeasure, virtualSlideElement) + 0.16;
+
+  if (startY + height > CONTENT_HEIGHT) {
+    slide = pptx.addSlide();
+    slide.addText(`${slideTitle} (cont.)`, {
+      ...TITLE_OPTIONS,
+      x: MARGIN_LEFT,
+      y: MARGIN_TOP,
+      w: CONTENT_WIDTH,
+    });
+    startY = MARGIN_TOP + TITLE_OPTIONS.h + 0.15;
+  }
+
+  slide.addShape(pptx.ShapeType.rect, {
+    x: MARGIN_LEFT,
+    y: startY,
+    w: CONTENT_WIDTH,
+    h: height,
+    fill: { color: 'F0FDF4' },
+    line: { color: '86EFAC', width: 1 },
+  });
+
+  const textProps: PptxGenJS.TextProps[] = [
+    { text: '✨ Clinical Pearls & Key Insights\n', options: { bold: true, color: '15803D', fontSize: 10.5 } },
+  ];
+
+  pearls.forEach((p) => {
+    const formatted = formatTextForPptx(cleanLatexForPptx(p));
+    textProps.push({ text: '• ', options: { bold: true, color: '15803D', fontSize: 10 } });
+    formatted.forEach((f) => {
+      textProps.push({ text: f.text, options: { bold: f.options?.bold ?? false, color: '064E3B', fontSize: 10 } });
+    });
+    textProps.push({ text: '\n', options: {} });
+  });
+
+  slide.addText(textProps, {
+    x: MARGIN_LEFT + 0.1,
+    y: startY + 0.05,
+    w: CONTENT_WIDTH - 0.2,
+    h: height - 0.08,
+    valign: 'top',
+  });
+
+  return { newY: startY + height + 0.12, slide };
+}
+
+async function renderQuestionsBox(
+  pptx: PptxGenJS,
+  slide: PptxGenJS.Slide,
+  questions: string[],
+  startY: number,
+  slideTitle: string,
+  virtualSlideElement: HTMLElement
+) {
+  if (!questions || questions.length === 0) return { newY: startY, slide };
+
+  const formattedItems = questions.map((q, idx) => `Q${idx + 1}: ${cleanLatexForPptx(q)}`).join('\n');
+  const htmlToMeasure = `<div style="width: 864px; font-size: 10.5pt; line-height: 1.35; margin: 0; padding: 6px; font-family: Inter, sans-serif;"><strong>Viva Questions:</strong><br/>${formattedItems}</div>`;
+  const height = measureHeight(htmlToMeasure, virtualSlideElement) + 0.16;
+
+  if (startY + height > CONTENT_HEIGHT) {
+    slide = pptx.addSlide();
+    slide.addText(`${slideTitle} (cont.)`, {
+      ...TITLE_OPTIONS,
+      x: MARGIN_LEFT,
+      y: MARGIN_TOP,
+      w: CONTENT_WIDTH,
+    });
+    startY = MARGIN_TOP + TITLE_OPTIONS.h + 0.15;
+  }
+
+  slide.addShape(pptx.ShapeType.rect, {
+    x: MARGIN_LEFT,
+    y: startY,
+    w: CONTENT_WIDTH,
+    h: height,
+    fill: { color: 'EFF6FF' },
+    line: { color: '93C5FD', width: 1 },
+  });
+
+  const textProps: PptxGenJS.TextProps[] = [
+    { text: '❓ Viva & Board Focus Questions\n', options: { bold: true, color: '1D4ED8', fontSize: 10.5 } },
+  ];
+
+  questions.forEach((q, idx) => {
+    const formatted = formatTextForPptx(cleanLatexForPptx(q));
+    textProps.push({ text: `Q${idx + 1}: `, options: { bold: true, color: '1D4ED8', fontSize: 10 } });
+    formatted.forEach((f) => {
+      textProps.push({ text: f.text, options: { bold: f.options?.bold ?? false, color: '1E3A8A', fontSize: 10 } });
+    });
+    textProps.push({ text: '\n', options: {} });
+  });
+
+  slide.addText(textProps, {
+    x: MARGIN_LEFT + 0.1,
+    y: startY + 0.05,
+    w: CONTENT_WIDTH - 0.2,
+    h: height - 0.08,
+    valign: 'top',
+  });
+
+  return { newY: startY + height + 0.12, slide };
 }
 
 /**
@@ -411,7 +610,21 @@ export async function generatePptx(
       w: CONTENT_WIDTH,
     });
     currentY += TITLE_OPTIONS.h;
-    currentY += 0.15; // Extra margin after title
+    currentY += 0.1; // Extra margin after title
+
+    // Render slide summary if available
+    if (slideData.summary) {
+      const { newY, slide } = await renderSummaryBox(
+        pptx,
+        currentSlide,
+        slideData.summary,
+        currentY,
+        slideData.title,
+        elementToUse!
+      );
+      currentY = newY;
+      currentSlide = slide;
+    }
 
     for (const content of slideData.content || []) {
       // If there's barely any space left before rendering the next element, break to new slide
@@ -493,6 +706,54 @@ export async function generatePptx(
           break;
         }
       }
+    }
+
+    // Render clinical pearls if present
+    if (slideData.clinicalPearls && slideData.clinicalPearls.length > 0) {
+      if (currentY >= CONTENT_HEIGHT - 0.5) {
+        currentSlide = pptx.addSlide();
+        currentSlide.addText(`${slideData.title} (cont.)`, {
+          ...TITLE_OPTIONS,
+          x: MARGIN_LEFT,
+          y: MARGIN_TOP,
+          w: CONTENT_WIDTH,
+        });
+        currentY = MARGIN_TOP + TITLE_OPTIONS.h + 0.15;
+      }
+      const { newY, slide } = await renderPearlsBox(
+        pptx,
+        currentSlide,
+        slideData.clinicalPearls,
+        currentY,
+        slideData.title,
+        elementToUse!
+      );
+      currentY = newY;
+      currentSlide = slide;
+    }
+
+    // Render proactive questions if present
+    if (slideData.proactiveQuestions && slideData.proactiveQuestions.length > 0) {
+      if (currentY >= CONTENT_HEIGHT - 0.5) {
+        currentSlide = pptx.addSlide();
+        currentSlide.addText(`${slideData.title} (cont.)`, {
+          ...TITLE_OPTIONS,
+          x: MARGIN_LEFT,
+          y: MARGIN_TOP,
+          w: CONTENT_WIDTH,
+        });
+        currentY = MARGIN_TOP + TITLE_OPTIONS.h + 0.15;
+      }
+      const { newY, slide } = await renderQuestionsBox(
+        pptx,
+        currentSlide,
+        slideData.proactiveQuestions,
+        currentY,
+        slideData.title,
+        elementToUse!
+      );
+      currentY = newY;
+      currentSlide = slide;
     }
   }
 

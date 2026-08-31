@@ -1622,31 +1622,27 @@ ${getAudienceDirective(audienceMode)}
 
         if (input.topic) {
             prompt += `
-Generate a structured presentation outline of 12-15 slide titles for the topic: **${input.topic}**.
+Generate a structured presentation outline of 12-15 slide titles for the topic: **${input.topic}** in ${language.toUpperCase()}.
 
 **Adaptive Domain & Subject Matter Guidance:**
 - If the topic is medical or clinical, structure the outline covering introduction, pathophysiology, clinical presentation, diagnostic criteria/workup, management guidelines, special populations/complications, and high-yield board summary.
-- CRITICAL: If you see any request which is unrelated to the medical topic which doesn't require MBBS or PG level medical attention (e.g. engineering, mathematics, computer science, physics, UPSC/civil services exam preparation, history, economics, business, or general knowledge), then shift your thinking from this unrelated medical topic to the attached query's Subject Matter Expert (SME) and professor. Structure the 12-15 slide titles to comprehensively cover that subject (e.g., Fundamentals & Core Principles, Theoretical Framework & Architecture, Key Equations/Concepts, Step-by-Step Mechanisms, Real-world Applications & Case Studies, Comparative Tables, Exam High-Yield Points, and Synthesis/Summary), while strictly maintaining the JSON formatting schema so that visual output is not hampered.
+- If non-medical (engineering, mathematics, physics, UPSC/civil services, history, general science), act as the Subject Matter Expert (SME) and structure 12-15 slide titles to cover fundamentals, framework, key equations/concepts, mechanisms, case studies, comparative tables, and exam pearls.
 
-${
-    audienceMode === 'simplified'
-        ? 'Structure the outline to introduce the topic from basic fundamentals and intuitive analogies up to practical understanding, exciting insights, and empowering applications.'
-        : 'Structure the outline with rigorous academic depth, systematic taxonomy, and high-yield professional/exam insights.'
-}
-
-Output a valid JSON object with a single key "outline" whose value is an array of strings in the target language.
+Output each topic title as a clean numbered list:
+1. Topic 1
+2. Topic 2
+...
 `;
         } else {
             prompt += `
-Generate a structured presentation outline of 10-12 topics based on this case or inquiry.
-
-**Adaptive Domain & Subject Matter Guidance:**
-- If the inquiry is medical, structure topics covering Case Summary & Key Questions, Mechanisms, Differential Considerations, Workup, Management, and Key Insights.
-- If the inquiry or attached data is non-medical (e.g. engineering, mathematics, general science, UPSC/exam preparation), shift your thinking to the premier Subject Matter Expert in that subject and structure the 10-12 topics logically for that field (Introduction & Core Questions, Fundamental Principles, Detailed Analysis, Applications/Examples, Exam Pearls & Summary).
+Generate a structured presentation outline of 10-12 topics based on this case or inquiry in ${language.toUpperCase()}.
 
 The VERY FIRST topic MUST be "${audienceMode === 'simplified' ? 'Core Story & Key Questions' : 'Case & Topic Summary with Key Questions'}".
 
-Output a valid JSON object with a single key "outline" containing an array of strings in the target language.
+Output each topic as a clean numbered list:
+1. Topic 1
+2. Topic 2
+...
 
 Case / Inquiry Details:
 Question: ${input.question}
@@ -1657,7 +1653,36 @@ Reasoning: ${input.reasoning}
 
         const text = await this._runPrompt(apiKeyOrConfig, prompt, undefined, input.onStreamChunk, { signal: input.signal });
 
-        return parseAiJson(text, {
+        // 1. Try Markdown list parse first
+        const lines = text.split('\n');
+        const outlineItems: string[] = [];
+        for (const line of lines) {
+            const clean = line.trim();
+            if (/^\d+[\.\)]\s+/.test(clean) || /^[-*]\s+/.test(clean)) {
+                const item = clean
+                    .replace(/^\d+[\.\)]\s+/, '')
+                    .replace(/^[-*]\s+/, '')
+                    .replace(/^\*\*|\*\*$/g, '')
+                    .trim();
+                if (item && item.length > 2 && !item.toLowerCase().startsWith('here is') && !item.toLowerCase().startsWith('outline:')) {
+                    outlineItems.push(item);
+                }
+            }
+        }
+        if (outlineItems.length > 0) {
+            return { outline: outlineItems };
+        }
+
+        // 2. Try JSON parse fallback
+        const parsedJson = parseAiJson<{ outline?: string[] } | string[]>(text, { outline: [] });
+        if (Array.isArray(parsedJson) && parsedJson.length > 0) {
+            return { outline: parsedJson.filter((t) => typeof t === 'string' && t.trim().length > 0) };
+        }
+        if (parsedJson && typeof parsedJson === 'object' && Array.isArray(parsedJson.outline) && parsedJson.outline.length > 0) {
+            return { outline: parsedJson.outline.filter((t) => typeof t === 'string' && t.trim().length > 0) };
+        }
+
+        return {
             outline: [
                 'Overview & First Principles',
                 'Core Mechanisms & Theory',
@@ -1667,11 +1692,11 @@ Reasoning: ${input.reasoning}
                 'Comparative Framework & Edge Cases',
                 'Fascinating Insights & Key Takeaways',
             ],
-        });
+        };
     },
 
     /**
-     * Detailed Slide Content Generator with Per-Slide Pearls and Summaries:
+     * Detailed Slide Content Generator with Per-Slide Pearls and Summaries (Low-Token Markdown Format):
      */
     async generateSlideContent(
         apiKeyOrConfig: string | AiConfig,
@@ -1699,7 +1724,7 @@ ${getAudienceDirective(audienceMode)}
 
 **Adaptive Domain & Subject Matter Guidance:**
 - If the presentation topic or inquiry is medical, provide authoritative clinical and pathophysiology content.
-- CRITICAL: If you see any request which is unrelated to the medical topic which doesn't require MBBS or PG level medical attention (e.g. engineering, mathematics, physics, computer science, economics, UPSC/civil services exam preparation, history, or general knowledge), then shift your thinking from this unrelated medical topic to the attached query's Subject Matter Expert (SME) and professor. Answer the question accordingly and deliver deep, accurate, and structured content for each slide, while STRICTLY maintaining the JSON formatting schema so that output should not get hampered in visual way. For non-medical topics, use "clinicalPearls" to provide high-yield domain pearls, exam tips, key formulas, or "Did You Know?" insights for that field.
+- If non-medical (engineering, mathematics, physics, computer science, economics, UPSC/civil services, history, or general knowledge), shift your thinking to the attached query's Subject Matter Expert (SME) and deliver deep, accurate content for that field.
 
 **Presentation Parameters:**
 - **Main Topic:** ${input.topic}
@@ -1710,32 +1735,44 @@ ${input.caseSummaryForPresentation ? `- **Case / Context Synthesis:** ${input.ca
 **Topics for Slide Generation:**
 ${input.selectedTopics.map((t: string) => `- ${t}`).join('\n')}
 
-**Core Requirements:**
-1. Generate one slide for EACH topic listed. Output MUST be a JSON array of slide objects.
-2. For each slide, produce:
-   - "title": Exact topic title from the list
-   - "content": Array of rich content items (paragraph, bullet_list, numbered_list, note, table)
-   - "summary": A 1-2 sentence high-yield summary of this slide's core message.
-   - "clinicalPearls": 2-3 ${audienceMode === 'simplified' ? 'fascinating first-principles insights or "Did You Know?" facts that spark excitement' : 'high-yield viva / exam pearls, core takeaways, or domain-specific insights'}.
-   - "proactiveQuestions": 2-3 proactive deep-dive questions related to this slide.
-3. For ${audienceMode === 'simplified' ? 'Simplified First-Principles audience: Use intuitive real-world analogies, clear cause-and-effect explanations, and accessible tables comparing normal vs affected states or concept comparisons.' : 'Doctor / Professional audience: Ensure dense, authoritative, guideline-cited or theory-cited content. Use formatted tables frequently for comparisons, criteria, reference values, differential diagnoses, or decision algorithms.'}
-4. Tables: Every table MUST be custom-tailored and distinct to that specific slide's topic with real, meaningful values and clear column headers (e.g., Parameter vs Value vs Significance, Feature A vs Feature B vs Application, Criteria vs Finding). NEVER reuse or duplicate generic table data across slides. In tables, EVERY row's "cells" array length MUST EXACTLY EQUAL the "headers" array length.
-5. For bolding, use the "bold" array with exact substring matches. DO NOT use markdown '**' in text strings.
-6. The entire output MUST be in the chosen target language (${language.toUpperCase()}).
+**Output Instructions (Structured Markdown):**
+Output the slide deck in structured Markdown format. Separate each slide with "---".
+For EACH topic in the list above, output one complete slide using this structure:
 
-**Supported Content Types:**
-- "paragraph": {"type": "paragraph", "text": "...", "bold": ["..."]}
-- "bullet_list": {"type": "bullet_list", "items": [{"text": "...", "bold": ["..."]}]}
-- "numbered_list": {"type": "numbered_list", "items": [{"text": "...", "bold": ["..."]}]}
-- "note": {"type": "note", "text": "..."}
-- "table": {"type": "table", "headers": ["Feature", "Finding / Range", "Significance"], "rows": [{"cells": ["Specific Criteria A", "Value / Observation", "Interpretation"]}]}
+# Slide: <Exact Topic Title>
+**Summary:** <1-2 sentence core message / high-yield takeaway>
 
-Produce ONLY the JSON array.
+### Key Concepts & Mechanisms
+- **Core Concept 1**: Detailed explanation of first principle / mechanism.
+- **Core Concept 2**: Detailed explanation of second principle / mechanism.
+
+| Feature / Metric | Expected Value / Comparison | Clinical / Practical Significance |
+| --- | --- | --- |
+| Row 1 Feature | Observation / Value | Clinical Interpretation |
+| Row 2 Feature | Observation / Value | Clinical Interpretation |
+
+> Note: High-yield clinical warning, guideline citation, or theoretical caveat.
+
+### Pearls
+- ${audienceMode === 'simplified' ? 'Fascinating first-principle insight or "Did You Know?" fact' : 'High-yield exam pearl, clinical guideline takeaway, or formula'}
+- ${audienceMode === 'simplified' ? 'Intuitive analogy or memory hook' : 'Differential pearl or management nuance'}
+
+### Proactive Questions
+- Thought-provoking deep dive question 1?
+- Thought-provoking deep dive question 2?
+
+---
+
+**Rules:**
+1. Generate one slide for EVERY topic in the selected list.
+2. Tables: Include custom-tailored markdown tables for comparisons, criteria, or values. Ensure columns match across all rows.
+3. Use bolding (**concept**) for key phrases.
+4. Output in ${language.toUpperCase()}.
 `;
 
         const text = await this._runPrompt(apiKeyOrConfig, prompt, undefined, input.onStreamChunk, { signal: input.signal });
 
-        // 1. Try progressive slide parser first (handles live markdown, code blocks, balance scanning, cell normalization)
+        // 1. Try progressive slide parser first (handles markdown slides, code blocks, balance scanning, cell normalization)
         const progressive = extractProgressiveSlides(text);
         if (progressive && progressive.length > 0) {
             const hasRealContent = progressive.some((s) => s.content && s.content.length > 0);
@@ -1744,7 +1781,7 @@ Produce ONLY the JSON array.
             }
         }
 
-        // 2. Try JSON parser with array unwrap
+        // 2. Try JSON parser with array unwrap fallback
         const parsed = parseAiJson<Slide[]>(text, []);
         if (Array.isArray(parsed) && parsed.length > 0) {
             const validParsed = parsed
@@ -1888,29 +1925,44 @@ ${getLanguageDirective(language)}
 ${getAudienceDirective(audienceMode)}
 
 **Adaptive Domain & Subject Matter Guidance:**
-- If the topic is non-medical, act as the premier Subject Matter Expert in that discipline, maintaining strict JSON structure.
+- If non-medical, act as the premier Subject Matter Expert in that discipline.
 
-Generate content for a single presentation slide on the topic: **${topic}**.
+Generate content for a single presentation slide on the topic: **${topic}** in structured Markdown format.
 
-**Requirements:**
-1. The slide's "title" must be "${topic}".
-2. Rich content using bullet lists, tables, or numbered lists in ${language.toUpperCase()}.
-3. Provide "summary", "clinicalPearls" (2-3 items), and "proactiveQuestions" (2-3 items).
-4. Output a single JSON object.
+# Slide: ${topic}
+**Summary:** <1-2 sentence core message / high-yield takeaway>
 
-Format:
-{
-  "title": "${topic}",
-  "content": [
-    {"type": "bullet_list", "items": [{"text": "...", "bold": ["..."]}]}
-  ],
-  "summary": "...",
-  "clinicalPearls": ["..."],
-  "proactiveQuestions": ["..."]
-}
+### Key Concepts & Analysis
+- **Concept 1**: Detailed explanation...
+- **Concept 2**: Detailed explanation...
+
+| Parameter / Feature | Value / Comparison | Significance |
+| --- | --- | --- |
+| Row 1 | Observation | Clinical Interpretation |
+
+> Note: Crucial clinical or theoretical note.
+
+### Pearls
+- ${audienceMode === 'simplified' ? 'Fascinating first-principle insight' : 'High-yield exam pearl or clinical guideline takeaway'}
+- ${audienceMode === 'simplified' ? 'Intuitive analogy' : 'Differential or management insight'}
+
+### Proactive Questions
+- Deep dive question 1?
+- Deep dive question 2?
 `;
 
         const text = await executeAiPrompt(apiKeyOrConfig, prompt, undefined, { signal: options?.signal });
+        
+        // 1. Try progressive markdown parser first
+        const progressive = extractProgressiveSlides(text);
+        if (progressive && progressive.length > 0 && progressive[0].content.length > 0) {
+            return {
+                ...progressive[0],
+                title: topic,
+            };
+        }
+
+        // 2. Fallback to JSON parse
         return parseAiJson(text, {
             title: topic,
             content: [{ type: 'paragraph', text: `Detailed information for ${topic}.` }],
@@ -2407,7 +2459,6 @@ ${modeInstructions}
 **Formatting Guidelines:**
 - Format in rich, clean GitHub-flavored Markdown.
 - Use bolding, clear sub-headings (###), bullet points, callout blockquotes (>), and comparison tables.
-- For all mathematical, physical, or biochemical equations, use standard LaTeX math syntax: enclose display equations in $$ ... $$ and inline formulas in $ ... $ (e.g. $$ T_{\\text{lunar}} = \\frac{24}{1 - \\dots} \\approx 24\\text{ h } 50\\text{ m} $$). Never leave raw unrendered formulas or wrap formulas in plain square brackets [...].
 - Write in ${language.toUpperCase()}.
 
 Produce the complete Markdown explanation directly without meta-commentary.`;

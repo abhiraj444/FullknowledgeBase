@@ -61,27 +61,60 @@ interface BoldRendererProps {
 
 const BoldRenderer: React.FC<BoldRendererProps> = ({ text, bold = [], className = '' }) => {
   if (!text) return null;
-  if (bold.length === 0) {
-    return <span className={className}>{text}</span>;
+
+  // 1. If text contains markdown bold syntax **...**
+  if (text.includes('**')) {
+    const parts: React.ReactNode[] = [];
+    const regex = /\*\*(.*?)\*\*/g;
+    let lastIdx = 0;
+    let match: RegExpExecArray | null;
+    let keyIdx = 0;
+
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        parts.push(<span key={keyIdx++}>{text.slice(lastIdx, match.index)}</span>);
+      }
+      parts.push(
+        <strong
+          key={keyIdx++}
+          className="font-bold text-foreground underline decoration-primary/40 decoration-2 underline-offset-2"
+        >
+          {match[1]}
+        </strong>
+      );
+      lastIdx = match.index + match[0].length;
+    }
+    if (lastIdx < text.length) {
+      parts.push(<span key={keyIdx++}>{text.slice(lastIdx)}</span>);
+    }
+    return <span className={`${className} text-wrap`}>{parts}</span>;
   }
 
-  const boldEscaped = bold.map((b) => b.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'));
-  const regex = new RegExp(`(${boldEscaped.join('|')})`, 'g');
-  const parts = text.split(regex).filter(Boolean);
+  // 2. If explicit bold array is provided
+  if (bold.length > 0) {
+    const boldEscaped = bold.map((b) => b.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'));
+    const regex = new RegExp(`(${boldEscaped.join('|')})`, 'g');
+    const parts = text.split(regex).filter(Boolean);
 
-  return (
-    <span className={`${className} text-wrap`}>
-      {parts.map((part, i) =>
-        bold.includes(part) ? (
-          <strong key={i} className="font-bold text-foreground underline decoration-primary/40 decoration-2 underline-offset-2">
-            {part}
-          </strong>
-        ) : (
-          part
-        )
-      )}
-    </span>
-  );
+    return (
+      <span className={`${className} text-wrap`}>
+        {parts.map((part, i) =>
+          bold.includes(part) ? (
+            <strong
+              key={i}
+              className="font-bold text-foreground underline decoration-primary/40 decoration-2 underline-offset-2"
+            >
+              {part}
+            </strong>
+          ) : (
+            part
+          )
+        )}
+      </span>
+    );
+  }
+
+  return <span className={className}>{text}</span>;
 };
 
 interface CompactSlideTableProps {
