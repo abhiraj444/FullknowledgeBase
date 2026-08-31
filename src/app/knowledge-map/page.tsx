@@ -87,6 +87,7 @@ function KnowledgeMapContent() {
 
   // Active Knowledge Map state
   const [currentCaseId, setCurrentCaseId] = useState<string | null>(null);
+  const currentCaseIdRef = useRef<string | null>(null);
   const [knowledgeMap, setKnowledgeMap] = useState<KnowledgeMapData | null>(null);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
 
@@ -116,6 +117,7 @@ function KnowledgeMapContent() {
       const existing = await LocalDataService.getCase(id);
       if (existing && existing.type === 'knowledge-map' && existing.outputData?.knowledgeMap) {
         setCurrentCaseId(existing.id);
+        currentCaseIdRef.current = existing.id;
         const mapData = existing.outputData.knowledgeMap as KnowledgeMapData;
         setKnowledgeMap(mapData);
         setTopicInput(existing.inputData?.topic || existing.title || '');
@@ -285,7 +287,10 @@ function KnowledgeMapContent() {
       setIsInputExpanded(false);
 
       // 4. Save to Dexie Local Database
-      const caseId = currentCaseId || crypto.randomUUID();
+      const caseId = currentCaseIdRef.current || currentCaseId || crypto.randomUUID();
+      currentCaseIdRef.current = caseId;
+      setCurrentCaseId(caseId);
+
       const newCase: LocalCase = {
         id: caseId,
         userId: user?.id || 'local-user',
@@ -304,7 +309,12 @@ function KnowledgeMapContent() {
       };
 
       await LocalDataService.saveCase(newCase);
-      setCurrentCaseId(caseId);
+
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('caseId', caseId);
+        window.history.replaceState(null, '', url.toString());
+      }
 
       toast({
         title: 'Knowledge Map Generated!',
@@ -525,7 +535,8 @@ function KnowledgeMapContent() {
   // Helper to persist updated map into Dexie DB
   const saveMapToDatabase = async (mapToSave: KnowledgeMapData) => {
     try {
-      const caseId = currentCaseId || crypto.randomUUID();
+      const caseId = currentCaseIdRef.current || currentCaseId || crypto.randomUUID();
+      currentCaseIdRef.current = caseId;
       if (!currentCaseId) {
         setCurrentCaseId(caseId);
       }
@@ -544,6 +555,14 @@ function KnowledgeMapContent() {
         },
         updatedAt: Date.now(),
       });
+
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('caseId') !== caseId) {
+          url.searchParams.set('caseId', caseId);
+          window.history.replaceState(null, '', url.toString());
+        }
+      }
     } catch (err) {
       console.error('Failed to auto-save knowledge map:', err);
     }

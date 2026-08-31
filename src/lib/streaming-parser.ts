@@ -382,7 +382,233 @@ function unwrapExpected<T>(parsed: any, fallback: T): T {
 }
 
 /**
- * Extracts progressive Diagnosis objects from a streaming JSON string as they complete.
+ * Robust parser that extracts full diagnosis, differentials, clinical answer,
+ * takeaways, and proactive questions from structured Markdown text.
+ */
+export function parseMarkdownToDiagnosis(markdownText: string): {
+  summary?: string;
+  diagnoses: DiagnosisItem[];
+  clinicalAnswer?: Partial<ClinicalAnswerData>;
+  proactiveQuestions: string[];
+  caseSummaryForPresentation?: string;
+} {
+  const result: {
+    summary?: string;
+    diagnoses: DiagnosisItem[];
+    clinicalAnswer?: Partial<ClinicalAnswerData>;
+    proactiveQuestions: string[];
+    caseSummaryForPresentation?: string;
+  } = {
+    diagnoses: [],
+    proactiveQuestions: [],
+  };
+
+  if (!markdownText || typeof markdownText !== 'string') return result;
+
+  const lines = markdownText.split('\n');
+  let currentSection = '';
+  let currentDiagnosis: Partial<DiagnosisItem> | null = null;
+  let currentSubField = '';
+  const clinicalAnswerLines: string[] = [];
+  const rationaleLines: string[] = [];
+  const takeaways: string[] = [];
+  const proactiveQuestions: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Check main headers
+    const h1Match = trimmed.match(/^#\s+(.+)$/i);
+    const h2Match = trimmed.match(/^##\s+(.+)$/i);
+    const h3Match = trimmed.match(/^###\s+(.+)$/i);
+
+    if (h1Match || h2Match) {
+      const headerTitle = (h1Match ? h1Match[1] : h2Match![1]).trim().toLowerCase();
+
+      // Commit previous diagnosis if any
+      if (currentDiagnosis && currentDiagnosis.diagnosis) {
+        result.diagnoses.push({
+          diagnosis: currentDiagnosis.diagnosis,
+          confidenceLevel: currentDiagnosis.confidenceLevel ?? 0.85,
+          lifeThreatCategory: currentDiagnosis.lifeThreatCategory || 'Emergent',
+          reasoning: sanitizeClinicalAnswerText(currentDiagnosis.reasoning || ''),
+          missingInformation: currentDiagnosis.missingInformation || { information: [], tests: [] },
+        });
+        currentDiagnosis = null;
+      }
+
+      if (headerTitle.includes('presentation') || headerTitle.includes('for presentation')) {
+        currentSection = 'caseSummaryForPresentation';
+      } else if (headerTitle.includes('summary') || headerTitle.includes('case summary')) {
+        currentSection = 'summary';
+      } else if (headerTitle.includes('differential') || headerTitle.includes('diagnoses')) {
+        currentSection = 'differentials';
+      } else if (headerTitle.includes('clinical synthesis') || headerTitle.includes('clinical answer') || headerTitle.includes('management') || headerTitle.includes('answer')) {
+        currentSection = 'clinicalAnswer';
+      } else if (headerTitle.includes('diagnostic rationale') || headerTitle.includes('underlying rationale') || headerTitle.includes('rationale') || headerTitle.includes('reasoning')) {
+        currentSection = 'rationale';
+      } else if (headerTitle.includes('key takeaway') || headerTitle.includes('takeaway')) {
+        currentSection = 'takeaways';
+      } else if (headerTitle.includes('proactive') || headerTitle.includes('follow-up') || headerTitle.includes('clinical question') || headerTitle.includes('questions')) {
+        currentSection = 'proactiveQuestions';
+      } else if (headerTitle.includes('topic')) {
+        currentSection = 'topic';
+        const topicVal = (h1Match ? h1Match[1] : h2Match![1]).replace(/^topic:\s*/i, '').trim();
+        if (topicVal) {
+          result.clinicalAnswer = {
+            ...result.clinicalAnswer,
+            topic: topicVal,
+          };
+        }
+      } else {
+        currentSection = 'other';
+      }
+      currentSubField = '';
+      continue;
+    }
+
+    if (h3Match && (currentSection === 'differentials' || currentSection === '')) {
+      // New diagnosis candidate
+      if (currentDiagnosis && currentDiagnosis.diagnosis) {
+        result.diagnoses.push({
+          diagnosis: currentDiagnosis.diagnosis,
+          confidenceLevel: currentDiagnosis.confidenceLevel ?? 0.85,
+          lifeThreatCategory: currentDiagnosis.lifeThreatCategory || 'Emergent',
+          reasoning: sanitizeClinicalAnswerText(currentDiagnosis.reasoning || ''),
+          missingInformation: currentDiagnosis.missingInformation || { information: [], tests: [] },
+        });
+      }
+
+      const diagTitle = h3Match[1].replace(/^\d+[\.\)]\s*/, '').replace(/^\*\*|\*\*$/g, '').trim();
+      currentDiagnosis = {
+        diagnosis: diagTitle,
+        confidenceLevel: 0.85,
+        lifeThreatCategory: 'Emergent',
+        reasoning: '',
+        missingInformation: { information: [], tests: [] },
+      };
+      currentSection = 'differentials';
+      currentSubField = '';
+      continue;
+    }
+
+    // Inside Section processing
+    if (currentSection === 'summary') {
+      if (trimmed) {
+        result.summary = (result.summary ? result.summary + '\n' : '') + trimmed;
+      }
+    } else if (currentSection === 'caseSummaryForPresentation') {
+      if (trimmed) {
+        result.caseSummaryForPresentation = (result.caseSummaryForPresentation ? result.caseSummaryForPresentation + '\n' : '') + trimmed;
+      }
+    } else if (currentSection === 'differentials' && currentDiagnosis) {
+      // Check sub-attributes like - **Confidence Level**: 0.95
+      const confMatch = trimmed.match(/^[-*•]\s*\*\*confidence(?:\s*level)?\*\*:\s*([0-9\.\%]+)/i);
+      const lifeMatch = trimmed.match(/^[-*•]\s*\*\*life\s*threat(?:\s*category)?\*\*:\s*(.+)/i);
+      const reasonMatch = trimmed.match(/^[-*•]\s*\*\*(?:clinical\s*)?reasoning\*\*:\s*(.*)/i);
+      const missMatch = trimmed.match(/^[-*•]\s*\*\*missing\s*information\*\*:\s*(.*)/i);
+      const testMatch = trimmed.match(/^[-*•]\s*\*\*(?:recommended\s*)?tests\*\*:\s*(.*)/i);
+
+      if (confMatch) {
+        const raw = confMatch[1];
+        if (raw.includes('%')) {
+          currentDiagnosis.confidenceLevel = Math.min(1, Math.max(0, parseInt(raw, 10) / 100));
+        } else {
+          const num = parseFloat(raw);
+          currentDiagnosis.confidenceLevel = isNaN(num) ? 0.85 : Math.min(1, Math.max(0, num));
+        }
+        currentSubField = '';
+      } else if (lifeMatch) {
+        const val = lifeMatch[1].toLowerCase();
+        if (val.includes('urgent') && !val.includes('emergent')) {
+          currentDiagnosis.lifeThreatCategory = 'Urgent';
+        } else if (val.includes('secondary') || val.includes('routine') || val.includes('low')) {
+          currentDiagnosis.lifeThreatCategory = 'Secondary';
+        } else {
+          currentDiagnosis.lifeThreatCategory = 'Emergent';
+        }
+        currentSubField = '';
+      } else if (reasonMatch) {
+        currentDiagnosis.reasoning = reasonMatch[1] ? reasonMatch[1].trim() : '';
+        currentSubField = 'reasoning';
+      } else if (missMatch) {
+        currentSubField = 'missingInfo';
+        if (missMatch[1]?.trim()) {
+          currentDiagnosis.missingInformation?.information.push(missMatch[1].trim());
+        }
+      } else if (testMatch) {
+        currentSubField = 'tests';
+        if (testMatch[1]?.trim()) {
+          currentDiagnosis.missingInformation?.tests.push(testMatch[1].trim());
+        }
+      } else if (currentSubField === 'missingInfo' && trimmed.startsWith('-')) {
+        const item = trimmed.replace(/^[-*•]\s*/, '').trim();
+        if (item) currentDiagnosis.missingInformation?.information.push(item);
+      } else if (currentSubField === 'tests' && trimmed.startsWith('-')) {
+        const item = trimmed.replace(/^[-*•]\s*/, '').trim();
+        if (item) currentDiagnosis.missingInformation?.tests.push(item);
+      } else if (currentSubField === 'reasoning') {
+        if (trimmed) {
+          currentDiagnosis.reasoning = (currentDiagnosis.reasoning ? currentDiagnosis.reasoning + '\n' : '') + trimmed;
+        }
+      } else if (!currentSubField && trimmed) {
+        // Default text into reasoning
+        currentDiagnosis.reasoning = (currentDiagnosis.reasoning ? currentDiagnosis.reasoning + '\n' : '') + trimmed;
+      }
+    } else if (currentSection === 'clinicalAnswer') {
+      clinicalAnswerLines.push(line);
+    } else if (currentSection === 'rationale') {
+      rationaleLines.push(line);
+    } else if (currentSection === 'takeaways') {
+      if (trimmed.startsWith('-') || trimmed.startsWith('*') || /^\d+[\.\)]/.test(trimmed)) {
+        const item = trimmed.replace(/^[-*•\d\.\)]+\s*/, '').trim();
+        if (item) takeaways.push(item);
+      } else if (trimmed) {
+        takeaways.push(trimmed);
+      }
+    } else if (currentSection === 'proactiveQuestions') {
+      if (trimmed.startsWith('-') || trimmed.startsWith('*') || /^\d+[\.\)]/.test(trimmed)) {
+        const item = trimmed.replace(/^[-*•\d\.\)]+\s*/, '').trim();
+        if (item) proactiveQuestions.push(item);
+      } else if (trimmed) {
+        proactiveQuestions.push(trimmed);
+      }
+    }
+  }
+
+  // Commit last diagnosis
+  if (currentDiagnosis && currentDiagnosis.diagnosis) {
+    result.diagnoses.push({
+      diagnosis: currentDiagnosis.diagnosis,
+      confidenceLevel: currentDiagnosis.confidenceLevel ?? 0.85,
+      lifeThreatCategory: currentDiagnosis.lifeThreatCategory || 'Emergent',
+      reasoning: sanitizeClinicalAnswerText(currentDiagnosis.reasoning || ''),
+      missingInformation: currentDiagnosis.missingInformation || { information: [], tests: [] },
+    });
+  }
+
+  const joinedAnswer = clinicalAnswerLines.join('\n').trim();
+  const joinedRationale = rationaleLines.join('\n').trim();
+
+  if (joinedAnswer || joinedRationale || takeaways.length > 0) {
+    result.clinicalAnswer = {
+      answer: sanitizeClinicalAnswerText(joinedAnswer || joinedRationale || markdownText),
+      reasoning: sanitizeClinicalAnswerText(joinedRationale || 'Evidence-based clinical synthesis.'),
+      topic: result.clinicalAnswer?.topic || 'Clinical Differential Analysis',
+      keyTakeaways: takeaways,
+    };
+  }
+
+  if (proactiveQuestions.length > 0) {
+    result.proactiveQuestions = proactiveQuestions;
+  }
+
+  return result;
+}
+
+/**
+ * Extracts progressive Diagnosis objects from streaming text (supporting both JSON and Markdown format) as they complete.
  */
 export function extractProgressiveDiagnosis(rawText: string): {
   summary?: string;
@@ -415,7 +641,20 @@ export function extractProgressiveDiagnosis(rawText: string): {
 
   if (!cleanText || cleanText.trim().length === 0) return result;
 
-  // Try parsing partial or full JSON with repair
+  // 1. Try Markdown extraction first if cleanText has markdown headings
+  if (cleanText.includes('#') || cleanText.includes('###') || cleanText.includes('## Differential')) {
+    const mdResult = parseMarkdownToDiagnosis(cleanText);
+    if (mdResult.diagnoses.length > 0 || (mdResult.clinicalAnswer && mdResult.clinicalAnswer.answer)) {
+      if (mdResult.summary) result.summary = mdResult.summary;
+      if (mdResult.caseSummaryForPresentation) result.caseSummaryForPresentation = mdResult.caseSummaryForPresentation;
+      if (mdResult.diagnoses.length > 0) result.diagnoses = mdResult.diagnoses;
+      if (mdResult.clinicalAnswer) result.clinicalAnswer = mdResult.clinicalAnswer;
+      if (mdResult.proactiveQuestions.length > 0) result.proactiveQuestions = mdResult.proactiveQuestions;
+      return result;
+    }
+  }
+
+  // 2. Try parsing partial or full JSON with repair
   try {
     const parsed = parseAiJson<any>(cleanText, null);
     if (parsed && typeof parsed === 'object') {
@@ -459,7 +698,7 @@ export function extractProgressiveDiagnosis(rawText: string): {
       }
     }
   } catch (e) {
-    // If structured parse fails, attempt regex extraction for partial streaming
+    // If structured parse fails, continue to regex extraction
   }
 
   // Regex fallback for progressive partial extraction if JSON parse returned empty or partial
@@ -494,7 +733,7 @@ export function extractProgressiveDiagnosis(rawText: string): {
   }
 
   if (result.diagnoses.length === 0) {
-    // 1. Scan for JSON diagnosis objects inside the string
+    // Scan for JSON diagnosis objects inside the string
     const diagRegex = /"diagnosis"\s*:\s*"((?:[^"\\]|\\.)*)"[\s\S]*?(?:"reasoning"\s*:\s*"((?:[^"\\]|\\.)*)"|(?:"reasoning"\s*:\s*"((?:[^"\\]|\\.)*)))?/gi;
     let match: RegExpExecArray | null;
     while ((match = diagRegex.exec(cleanText)) !== null) {
@@ -512,9 +751,8 @@ export function extractProgressiveDiagnosis(rawText: string): {
     }
   }
 
-  // 2. Markdown & Plain-Text List Extraction Fallback
+  // Markdown List Extraction Fallback
   if (result.diagnoses.length === 0) {
-    // Match numbered list: "1. **Acute Coronary Syndrome**: Reasoning..." or "1. Acute Coronary Syndrome - Reasoning..."
     const numberedRegex = /(?:^|\n)\s*(?:(?:\d+[\.\)]|\-|\*)\s+)(?:\*\*)?([A-Z0-9\s\-\/\(\)]+?)(?:\*\*)?\s*(?::|-|–|—|\n)\s*([\s\S]*?)(?=(?:\n\s*(?:\d+[\.\)]|\-|\*)\s+(?:\*\*)?[A-Z0-9]|\n\n\n|$))/gi;
     let m: RegExpExecArray | null;
     while ((m = numberedRegex.exec(cleanText)) !== null) {
@@ -544,7 +782,7 @@ export function extractProgressiveDiagnosis(rawText: string): {
     }
   }
 
-  // 3. If clinicalAnswer answer is still not set, set it from cleanText
+  // If clinicalAnswer is still not set, set it from cleanText
   if (!result.clinicalAnswer || !result.clinicalAnswer.answer) {
     const cleanedAnswer = sanitizeClinicalAnswerText(cleanText);
     if (cleanedAnswer && cleanedAnswer.length > 20) {

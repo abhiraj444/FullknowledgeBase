@@ -82,12 +82,14 @@ export const LocalDataService = {
     return id;
   },
 
-  async getUserCases(userId: string) {
-    return await db.cases
-      .where('userId')
-      .equals(userId)
-      .reverse()
-      .sortBy('createdAt');
+  async getUserCases(userId?: string) {
+    const all = await db.cases.toArray();
+    return all
+      .filter((c) => {
+        if (!userId) return true;
+        return c.userId === userId || c.userId === 'local-user' || !c.userId;
+      })
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   },
 
   async deleteCase(id: string) {

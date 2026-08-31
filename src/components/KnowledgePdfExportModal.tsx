@@ -134,6 +134,17 @@ function stripMarkdown(md: string): string {
 }
 
 /**
+ * Formats inline bold, italic, code, and symbols within markdown text.
+ */
+function formatInline(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/(\*\*|__)([\s\S]+?)\1/g, '<strong>$2</strong>')
+    .replace(/(\*|_)([\s\S]+?)\1/g, '<em>$2</em>')
+    .replace(/`([^`]+)`/g, '<code style="background-color: #f1f5f9; padding: 1px 4px; border-radius: 4px; font-family: monospace; font-size: 8.5pt;">$1</code>');
+}
+
+/**
  * Converts markdown formatting and LaTeX math to clean semantic HTML for printing.
  */
 function simpleMarkdownToHtml(md: string): string {
@@ -177,16 +188,73 @@ function simpleMarkdownToHtml(md: string): string {
   const lines = text.split('\n');
   const htmlLines: string[] = [];
   let inList = false;
+  let inTable = false;
+  let tableRows: string[][] = [];
 
-  for (let line of lines) {
-    const trimmed = line.trim();
+  const flushTable = () => {
+    if (tableRows.length === 0) return;
+    const headerRow = tableRows[0];
+    const bodyRows = tableRows.slice(1);
+
+    let tableHtml = '<table style="width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 9pt; border: 1px solid #cbd5e1;">';
+    if (headerRow && headerRow.length > 0) {
+      tableHtml += '<thead><tr style="background-color: #f1f5f9; border-bottom: 2px solid #cbd5e1;">';
+      headerRow.forEach((h) => {
+        tableHtml += `<th style="padding: 6px 8px; text-align: left; font-weight: 700; color: #1e293b; border: 1px solid #cbd5e1;">${formatInline(h)}</th>`;
+      });
+      tableHtml += '</tr></thead>';
+    }
+    if (bodyRows.length > 0) {
+      tableHtml += '<tbody>';
+      bodyRows.forEach((r, idx) => {
+        const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
+        tableHtml += `<tr style="background-color: ${bg};">`;
+        r.forEach((c) => {
+          tableHtml += `<td style="padding: 5px 8px; color: #334155; border: 1px solid #cbd5e1; vertical-align: top;">${formatInline(c)}</td>`;
+        });
+        tableHtml += '</tr>';
+      });
+      tableHtml += '</tbody>';
+    }
+    tableHtml += '</table>';
+    htmlLines.push(tableHtml);
+    tableRows = [];
+    inTable = false;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
 
     if (!trimmed) {
       if (inList) {
         htmlLines.push('</ul>');
         inList = false;
       }
+      if (inTable) {
+        flushTable();
+      }
       continue;
+    }
+
+    // Check for Markdown table line
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      if (inList) {
+        htmlLines.push('</ul>');
+        inList = false;
+      }
+      // If separator line like |---|---|
+      if (/^\|(\s*:?-+:?\s*\|)+$/.test(trimmed)) {
+        continue; // Skip separator line
+      }
+      inTable = true;
+      const cells = trimmed
+        .slice(1, -1)
+        .split('|')
+        .map((c) => c.trim());
+      tableRows.push(cells);
+      continue;
+    } else if (inTable) {
+      flushTable();
     }
 
     if (trimmed.startsWith('### ')) {
@@ -265,6 +333,9 @@ function simpleMarkdownToHtml(md: string): string {
 
   if (inList) {
     htmlLines.push('</ul>');
+  }
+  if (inTable) {
+    flushTable();
   }
 
   return htmlLines.join('\n');
@@ -422,16 +493,6 @@ function renderPdfCard(params: PdfCardRenderParams): number {
   }
 
   return y;
-}
-
-function formatInline(str: string): string {
-  return str
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(
-      /`([^`]+)`/g,
-      '<code style="background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 8.5pt;">$1</code>'
-    );
 }
 
 export function KnowledgePdfExportModal({

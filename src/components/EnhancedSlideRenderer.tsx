@@ -62,59 +62,92 @@ interface BoldRendererProps {
 const BoldRenderer: React.FC<BoldRendererProps> = ({ text, bold = [], className = '' }) => {
   if (!text) return null;
 
-  // 1. If text contains markdown bold syntax **...**
-  if (text.includes('**')) {
-    const parts: React.ReactNode[] = [];
-    const regex = /\*\*(.*?)\*\*/g;
-    let lastIdx = 0;
-    let match: RegExpExecArray | null;
-    let keyIdx = 0;
-
-    while ((match = regex.exec(text)) !== null) {
-      if (match.index > lastIdx) {
-        parts.push(<span key={keyIdx++}>{text.slice(lastIdx, match.index)}</span>);
-      }
-      parts.push(
-        <strong
-          key={keyIdx++}
-          className="font-bold text-foreground underline decoration-primary/40 decoration-2 underline-offset-2"
-        >
-          {match[1]}
-        </strong>
-      );
-      lastIdx = match.index + match[0].length;
-    }
-    if (lastIdx < text.length) {
-      parts.push(<span key={keyIdx++}>{text.slice(lastIdx)}</span>);
-    }
-    return <span className={`${className} text-wrap`}>{parts}</span>;
-  }
-
-  // 2. If explicit bold array is provided
-  if (bold.length > 0) {
-    const boldEscaped = bold.map((b) => b.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'));
-    const regex = new RegExp(`(${boldEscaped.join('|')})`, 'g');
-    const parts = text.split(regex).filter(Boolean);
-
-    return (
-      <span className={`${className} text-wrap`}>
-        {parts.map((part, i) =>
-          bold.includes(part) ? (
+  // Helper to highlight a plain string segment using the explicit bold array if supplied
+  const renderSegmentWithBoldArray = (segment: string, keyPrefix: string): React.ReactNode => {
+    if (!segment) return null;
+    if (bold && bold.length > 0) {
+      const validBold = bold.filter((b) => b && b.trim().length > 0);
+      if (validBold.length > 0) {
+        const boldEscaped = validBold.map((b) => b.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'));
+        const regex = new RegExp(`(${boldEscaped.join('|')})`, 'gi');
+        const parts = segment.split(regex);
+        return parts.map((part, i) => {
+          const isMatch = validBold.some((b) => b.toLowerCase() === part.toLowerCase());
+          return isMatch ? (
             <strong
-              key={i}
+              key={`${keyPrefix}-b-${i}`}
               className="font-bold text-foreground underline decoration-primary/40 decoration-2 underline-offset-2"
             >
               {part}
             </strong>
           ) : (
-            part
-          )
-        )}
-      </span>
-    );
+            <span key={`${keyPrefix}-t-${i}`}>{part}</span>
+          );
+        });
+      }
+    }
+    return segment;
+  };
+
+  // 1. Process Markdown Bold syntax (**...** or __...__) and Inline Math ($...$)
+  // Regex matches: **bold**, __bold__, and $math$
+  const tokenRegex = /(\*\*(.*?)\*\*|__(.*?)__|(?:\$)([^$]+?)(?:\$))/g;
+  const parts: React.ReactNode[] = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+  let keyIdx = 0;
+
+  while ((match = tokenRegex.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      const preceding = text.slice(lastIdx, match.index);
+      parts.push(renderSegmentWithBoldArray(preceding, `pre-${keyIdx++}`));
+    }
+
+    if (match[2] !== undefined) {
+      // **bold**
+      parts.push(
+        <strong
+          key={`md-bold-${keyIdx++}`}
+          className="font-bold text-foreground underline decoration-primary/40 decoration-2 underline-offset-2"
+        >
+          {match[2]}
+        </strong>
+      );
+    } else if (match[3] !== undefined) {
+      // __bold__
+      parts.push(
+        <strong
+          key={`md-under-${keyIdx++}`}
+          className="font-bold text-foreground underline decoration-primary/40 decoration-2 underline-offset-2"
+        >
+          {match[3]}
+        </strong>
+      );
+    } else if (match[4] !== undefined) {
+      // $math$
+      parts.push(
+        <code
+          key={`math-${keyIdx++}`}
+          className="px-1 py-0.5 rounded bg-muted/60 font-mono text-[11px] text-foreground"
+        >
+          {match[4]}
+        </code>
+      );
+    }
+
+    lastIdx = match.index + match[0].length;
   }
 
-  return <span className={className}>{text}</span>;
+  if (lastIdx < text.length) {
+    const trailing = text.slice(lastIdx);
+    parts.push(renderSegmentWithBoldArray(trailing, `post-${keyIdx++}`));
+  }
+
+  if (parts.length > 0) {
+    return <span className={`${className} text-wrap`}>{parts}</span>;
+  }
+
+  return <span className={className}>{renderSegmentWithBoldArray(text, 'root')}</span>;
 };
 
 interface CompactSlideTableProps {
@@ -176,7 +209,7 @@ const CompactSlideTable: React.FC<CompactSlideTableProps> = ({ tableItem, slideT
                       key={j}
                       className="text-foreground text-[11px] leading-snug border-border/30 px-2 py-1.5 break-words font-sans align-top"
                     >
-                      {cell}
+                      <BoldRenderer text={cell} />
                     </TableCell>
                   ))}
                 </TableRow>
@@ -228,7 +261,7 @@ const CompactSlideTable: React.FC<CompactSlideTableProps> = ({ tableItem, slideT
                         key={j}
                         className="text-foreground text-xs sm:text-sm border-border/40 px-4 py-3 break-words font-sans align-top"
                       >
-                        {cell}
+                        <BoldRenderer text={cell} />
                       </TableCell>
                     ))}
                   </TableRow>
@@ -323,7 +356,7 @@ const ContentItemRenderer: React.FC<ContentItemRendererProps> = ({
             <span>Clinical Annotation</span>
           </div>
           <p className="text-xs sm:text-sm font-sans font-medium text-amber-950 dark:text-amber-100 leading-relaxed">
-            {item.text.replace(/^Note:\s*/i, '')}
+            <BoldRenderer text={item.text.replace(/^Note:\s*/i, '')} />
           </p>
         </div>
       )}
@@ -689,7 +722,9 @@ export const EnhancedSlideRenderer: React.FC<EnhancedSlideRendererProps> = ({
                 </div>
                 <ul className="space-y-1.5 pl-4 list-disc text-xs sm:text-sm font-sans font-medium text-emerald-950 dark:text-emerald-100">
                   {slide.clinicalPearls.map((pearl, i) => (
-                    <li key={i}>{pearl}</li>
+                    <li key={i}>
+                      <BoldRenderer text={pearl} />
+                    </li>
                   ))}
                 </ul>
               </div>

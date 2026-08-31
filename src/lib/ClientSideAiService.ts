@@ -7,6 +7,7 @@ import {
     repairJsonString,
     extractBalancedJson,
     extractProgressiveDiagnosis,
+    parseMarkdownToDiagnosis,
     extractProgressiveSlides,
     extractProgressiveClinicalAnswer,
     sanitizeContentItems,
@@ -19,6 +20,7 @@ export {
     repairJsonString,
     extractBalancedJson,
     extractProgressiveDiagnosis,
+    parseMarkdownToDiagnosis,
     extractProgressiveSlides,
     extractProgressiveClinicalAnswer,
     sanitizeContentItems,
@@ -1190,101 +1192,88 @@ ${getAudienceDirective(audienceMode)}
 
 Analyze the provided clinical notes, patient history, laboratory findings, attached audio dictations/voice memos, and medical imaging/documents. If audio files are attached, listen to the speaker's case presentation, auscultation audio, or symptoms described.
 
-**Required Output Schema:**
-Return a single, strictly valid JSON object matching this structure:
-{
-  "summary": "Concise 1-2 sentence summary of the case vignette / core bodily issue",
-  "diagnoses": [
-    {
-      "diagnosis": "Condition Name",
-      "confidenceLevel": 0.85,
-      "lifeThreatCategory": "Emergent" | "Urgent" | "Secondary",
-      "reasoning": "${
-          audienceMode === 'simplified'
-              ? 'First-principles explanation of how this condition affects the body, using intuitive real-world analogies so anyone can understand why this happens.'
-              : 'Detailed pathophysiology and clinical evidence supporting or refuting this diagnosis based on findings.'
-      }",
-      "missingInformation": {
-        "information": ["${
-            audienceMode === 'simplified'
-                ? 'Key questions or everyday symptoms to check with the patient / doctor'
-                : 'Specific clinical history or physical exam findings to clarify'
-        }"],
-        "tests": ["${
-            audienceMode === 'simplified'
-                ? 'Simple explanation of what tests (e.g. Blood test, X-Ray, ECG) are needed and why'
-                : 'Specific guideline-directed diagnostic test / biomarker / imaging with rationale'
-        }"]
-      }
-    }
-  ],
-  "clinicalAnswer": {
-    "answer": "${
-        audienceMode === 'simplified'
-            ? 'Engaging first-principles synthesis covering: 1. How this bodily system works normally vs what happened here, 2. Intuitive analogy explaining the root cause, 3. Immediate safe steps & what doctors look for, 4. How standard treatments help restore normal function, 5. Fascinating takeaways that spark curiosity for self-research.'
-            : 'In-depth clinical synthesis covering: 1. Primary clinical impression & pathophysiology, 2. Immediate stabilization & triage protocols, 3. Step-by-step guideline-directed medical therapy (e.g. ACC/AHA, ESC, KDIGO, GOLD, Surviving Sepsis), 4. Key prognostic indicators and red flags.'
-    }",
-    "reasoning": "${
-        audienceMode === 'simplified'
-            ? 'The intuitive scientific explanation behind why these conclusions make sense.'
-            : 'Comprehensive diagnostic breakdown and clinical judgment rationale.'
-    }",
-    "topic": "Primary Medical Specialty & Topic",
-    "keyTakeaways": [
-      "${audienceMode === 'simplified' ? 'Exciting first-principle takeaway 1' : 'Crucial clinical takeaway 1'}",
-      "${audienceMode === 'simplified' ? 'Exciting first-principle takeaway 2' : 'Crucial clinical takeaway 2'}",
-      "${audienceMode === 'simplified' ? 'Exciting first-principle takeaway 3' : 'Crucial clinical takeaway 3'}"
-    ]
-  },
-  "proactiveQuestions": [
-    "${
-        audienceMode === 'simplified'
-            ? 'Thought-provoking question 1 to spark curiosity about how the body adapts or compensates'
-            : 'High-yield follow-up question 1 highlighting potential diagnostic blind spots or second-line management'
-    }",
-    "${
-        audienceMode === 'simplified'
-            ? 'Fascinating question 2 about the science behind why specific treatments work'
-            : 'High-yield follow-up question 2 regarding atypical presentations or drug contraindications'
-    }",
-    "${
-        audienceMode === 'simplified'
-            ? 'Curiosity question 3 exploring related bodily systems or evolutionary biology'
-            : 'High-yield follow-up question 3 regarding monitoring protocols or escalation triggers'
-    }",
-    "${
-        audienceMode === 'simplified'
-            ? 'Practical question 4 on what patients can research to better understand their health'
-            : 'High-yield follow-up question 4 regarding board-relevant differential distinctions'
-    }"
-  ],
-  "caseSummaryForPresentation": "A dense, structured synthesis combining presentation, key findings, provisional diagnoses, and mechanism. This will be used directly as text context to generate educational slide decks without re-sending raw image files.",
-  "reportKnowledge": {
-    "reportType": "Title of any attached report/panel or null if pure vignette",
-    "patientOverview": "Brief laboratory/imaging overview",
-    "totalParametersCount": 0,
-    "abnormalParametersCount": 0,
-    "criticalAlerts": [],
-    "keyClinicalHighlights": [],
-    "categories": [
-      {
-        "categoryName": "Category Name",
-        "parameters": [
-          {
-            "name": "Parameter Name",
-            "category": "Category",
-            "value": "Value",
-            "unit": "Unit",
-            "referenceRange": "Ref Range",
-            "status": "normal" | "high" | "low" | "critical_high" | "critical_low" | "abnormal",
-            "interpretation": "Interpretation",
-            "whatIfIncreased": "Clinical explanation if increased",
-            "whatIfDecreased": "Clinical explanation if decreased"
-          }
-        ]
-      }
-    ]
+**Required Output Format:**
+Output your complete, structured clinical evaluation strictly in clean Markdown format as specified below (DO NOT output raw JSON):
+
+# Case Summary
+[Concise 1-2 sentence summary of the case vignette / core bodily issue in the target language]
+
+# Case Summary For Presentation
+[Dense, structured clinical presentation context combining chief complaint, history, physical exam, and imaging/labs for educational slides]
+
+## Differential Diagnoses
+
+### 1. Condition Name
+- **Confidence Level**: 0.85
+- **Life Threat Category**: Emergent
+- **Clinical Reasoning**:
+${
+    audienceMode === 'simplified'
+        ? 'First-principles explanation of how this condition affects the body, using intuitive real-world analogies so anyone can understand why this happens.'
+        : 'Detailed pathophysiology and clinical evidence supporting or refuting this diagnosis based on findings.'
+}
+- **Missing Information**:
+  - ${
+      audienceMode === 'simplified'
+          ? 'Key questions or everyday symptoms to check with the patient / doctor'
+          : 'Specific clinical history or physical exam findings to clarify'
   }
+- **Recommended Tests**:
+  - ${
+      audienceMode === 'simplified'
+          ? 'Simple explanation of what tests (e.g. Blood test, X-Ray, ECG) are needed and why'
+          : 'Specific guideline-directed diagnostic test / biomarker / imaging with rationale'
+  }
+
+### 2. Second Condition Name
+- **Confidence Level**: 0.65
+- **Life Threat Category**: Urgent
+- **Clinical Reasoning**:
+[Reasoning for second differential]
+- **Missing Information**:
+  - [Missing info]
+- **Recommended Tests**:
+  - [Recommended diagnostic test]
+
+## Clinical Synthesis & Management
+${
+    audienceMode === 'simplified'
+        ? 'Engaging first-principles synthesis covering:\n1. How this bodily system works normally vs what happened here\n2. Intuitive analogy explaining the root cause\n3. Immediate safe steps & what doctors look for\n4. How standard treatments help restore normal function\n5. Fascinating takeaways that spark curiosity for self-research.'
+        : 'In-depth clinical synthesis covering:\n1. Primary clinical impression & pathophysiology\n2. Immediate stabilization & triage protocols\n3. Step-by-step guideline-directed medical therapy (e.g. ACC/AHA, ESC, KDIGO, GOLD, Surviving Sepsis)\n4. Key prognostic indicators and red flags.'
+}
+
+## Diagnostic Rationale
+${
+    audienceMode === 'simplified'
+        ? 'The intuitive scientific explanation behind why these conclusions make sense.'
+        : 'Comprehensive diagnostic breakdown and clinical judgment rationale.'
+}
+
+## Key Takeaways
+- ${audienceMode === 'simplified' ? 'Exciting first-principle takeaway 1' : 'Crucial clinical takeaway 1'}
+- ${audienceMode === 'simplified' ? 'Exciting first-principle takeaway 2' : 'Crucial clinical takeaway 2'}
+- ${audienceMode === 'simplified' ? 'Exciting first-principle takeaway 3' : 'Crucial clinical takeaway 3'}
+
+## Proactive Clinical Questions
+- ${
+    audienceMode === 'simplified'
+        ? 'Thought-provoking question 1 to spark curiosity about how the body adapts or compensates'
+        : 'High-yield follow-up question 1 highlighting potential diagnostic blind spots or second-line management'
+}
+- ${
+    audienceMode === 'simplified'
+        ? 'Fascinating question 2 about the science behind why specific treatments work'
+        : 'High-yield follow-up question 2 regarding atypical presentations or drug contraindications'
+}
+- ${
+    audienceMode === 'simplified'
+        ? 'Curiosity question 3 exploring related bodily systems or evolutionary biology'
+        : 'High-yield follow-up question 3 regarding monitoring protocols or escalation triggers'
+}
+- ${
+    audienceMode === 'simplified'
+        ? 'Practical question 4 on what patients can research to better understand their health'
+        : 'High-yield follow-up question 4 regarding board-relevant differential distinctions'
 }
 
 ${patientData ? `\nPatient Data & Clinical Notes:\n${patientData}` : ''}
@@ -1317,6 +1306,9 @@ ${patientData ? `\nPatient Data & Clinical Notes:\n${patientData}` : ''}
         const { cleanText, thinking: inlineThinking } = stripThinkingTags(text || '');
         const effectiveThinking = capturedThinking || inlineThinking || undefined;
 
+        // Try parsing markdown first, then JSON
+        const mdParsed = parseMarkdownToDiagnosis(cleanText);
+
         const fallback = {
             diagnoses: [
                 {
@@ -1342,10 +1334,14 @@ ${patientData ? `\nPatient Data & Clinical Notes:\n${patientData}` : ''}
             reportKnowledge: null as ReportKnowledgeData | null,
         };
 
-        const parsed = parseAiJson(cleanText, fallback);
+        let parsed: any = mdParsed;
+        if (mdParsed.diagnoses.length === 0 && (!mdParsed.clinicalAnswer || !mdParsed.clinicalAnswer.answer)) {
+            parsed = parseAiJson(cleanText, fallback);
+        }
 
-        // Ensure clinical answer and diagnosis reasoning are strictly sanitized (no raw thinking tags or raw JSON)
-        const sanitizedDiagnoses = (parsed.diagnoses || fallback.diagnoses).map((d: any, idx: number) => ({
+        // Ensure clinical answer and diagnosis reasoning are strictly sanitized
+        const rawDiagnoses = parsed.diagnoses && parsed.diagnoses.length > 0 ? parsed.diagnoses : fallback.diagnoses;
+        const sanitizedDiagnoses = rawDiagnoses.map((d: any, idx: number) => ({
             diagnosis: d.diagnosis || d.condition || `Differential #${idx + 1}`,
             confidenceLevel: typeof d.confidenceLevel === 'number' ? d.confidenceLevel : 0.8,
             lifeThreatCategory: d.lifeThreatCategory || 'Emergent',
@@ -1356,18 +1352,19 @@ ${patientData ? `\nPatient Data & Clinical Notes:\n${patientData}` : ''}
             },
         }));
 
+        const rawAnswer = parsed.clinicalAnswer || fallback.clinicalAnswer;
         const sanitizedClinicalAnswer = {
-            answer: sanitizeClinicalAnswerText(parsed.clinicalAnswer?.answer || fallback.clinicalAnswer.answer),
-            reasoning: sanitizeClinicalAnswerText(parsed.clinicalAnswer?.reasoning || fallback.clinicalAnswer.reasoning),
-            topic: parsed.clinicalAnswer?.topic || fallback.clinicalAnswer.topic,
-            keyTakeaways: Array.isArray(parsed.clinicalAnswer?.keyTakeaways) ? parsed.clinicalAnswer.keyTakeaways : [],
+            answer: sanitizeClinicalAnswerText(rawAnswer?.answer || cleanText || fallback.clinicalAnswer.answer),
+            reasoning: sanitizeClinicalAnswerText(rawAnswer?.reasoning || fallback.clinicalAnswer.reasoning),
+            topic: rawAnswer?.topic || fallback.clinicalAnswer.topic,
+            keyTakeaways: Array.isArray(rawAnswer?.keyTakeaways) ? rawAnswer.keyTakeaways : [],
         };
 
         return {
             diagnoses: sanitizedDiagnoses,
             clinicalAnswer: sanitizedClinicalAnswer,
             summary: parsed.summary || fallback.summary,
-            proactiveQuestions: parsed.proactiveQuestions || fallback.proactiveQuestions,
+            proactiveQuestions: parsed.proactiveQuestions && parsed.proactiveQuestions.length > 0 ? parsed.proactiveQuestions : fallback.proactiveQuestions,
             caseSummaryForPresentation:
                 parsed.caseSummaryForPresentation || parsed.summary || patientData || 'Case study details',
             reportKnowledge: parsed.reportKnowledge && parsed.reportKnowledge.categories && parsed.reportKnowledge.categories.length > 0 ? parsed.reportKnowledge : null,
@@ -1409,7 +1406,7 @@ ${getAudienceDirective(audienceMode)}
 
 **Adaptive Domain & Subject Matter Guidance:**
 - If the case or inquiry is clinical/medical, provide rigorous evidence-based clinical guidance.
-- If you see any request, question, or attached document/image which is unrelated to medical topics (e.g. engineering, mathematics, computer science, physics, chemistry, competitive exams like UPSC/GATE/NEET, history, economics, philosophy, law, or general knowledge) which does not require medical domain knowledge, then shift your thinking from medicine to the attached query's Subject Matter Expert (SME) and professor. Answer the question thoroughly and accurately according to that discipline, while STRICTLY maintaining the JSON formatting schema below so that visual output is not hampered.
+- If you see any request, question, or attached document/image which is unrelated to medical topics (e.g. engineering, mathematics, computer science, physics, chemistry, competitive exams like UPSC/GATE/NEET, history, economics, philosophy, law, or general knowledge) which does not require medical domain knowledge, then shift your thinking from medicine to the attached query's Subject Matter Expert (SME) and professor. Answer the question thoroughly and accurately according to that discipline in clear Markdown formatting.
 
 **Original Context:**
 - Clinical Notes / Question: ${params.originalQuestion || 'N/A'}
@@ -1431,21 +1428,61 @@ ${
 1. Provide a comprehensive answer tailored to the specified audience and language. If images, lab panels, schematics, or PDF documents are attached, examine them closely.
 2. If in Simplified mode, break down the answer from first principles with intuitive analogies. If in Doctor/Advanced mode, provide deep academic and guideline/theoretical precision.
 3. Suggest 3 additional high-yield follow-up questions relevant to this thread.
-4. Output MUST be a valid JSON object:
-{
-  "answer": "Clear, detailed answer with markdown formatting for bold headings and key points in the chosen language.",
-  "reasoning": "Underlying mechanism, theoretical foundation, or analytical rationale.",
-  "suggestedFollowUps": ["Next question 1", "Next question 2", "Next question 3"]
-}
+4. Output your response strictly in Markdown format:
+
+## Answer
+[Comprehensive, well-structured answer with bold headings and key points in the chosen language]
+
+## Underlying Rationale
+[Underlying mechanism, theoretical foundation, or analytical rationale]
+
+## Proactive Questions
+- Next question 1
+- Next question 2
+- Next question 3
 `;
 
         const text = await this._runPrompt(apiKeyOrConfig, prompt, params.images, params.onStreamChunk, { signal: params.signal });
 
-        return parseAiJson(text, {
-            answer: text,
-            reasoning: 'Reasoning provided.',
-            suggestedFollowUps: [],
-        });
+        const { cleanText } = stripThinkingTags(text || '');
+
+        // Extract markdown sections
+        let answer = cleanText;
+        let reasoning = 'Reasoning provided.';
+        const suggestedFollowUps: string[] = [];
+
+        const ansMatch = cleanText.match(/##\s+Answer\s*([\s\S]*?)(?=##\s+Underlying Rationale|##\s+Proactive Questions|$)/i);
+        const reasonMatch = cleanText.match(/##\s+Underlying Rationale\s*([\s\S]*?)(?=##\s+Proactive Questions|$)/i);
+        const questionsMatch = cleanText.match(/##\s+Proactive Questions\s*([\s\S]*?)$/i);
+
+        if (ansMatch && ansMatch[1]?.trim()) {
+            answer = ansMatch[1].trim();
+        }
+        if (reasonMatch && reasonMatch[1]?.trim()) {
+            reasoning = reasonMatch[1].trim();
+        }
+        if (questionsMatch && questionsMatch[1]?.trim()) {
+            const lines = questionsMatch[1].trim().split('\n');
+            for (const l of lines) {
+                const q = l.replace(/^[-*•\d\.\)]+\s*/, '').trim();
+                if (q) suggestedFollowUps.push(q);
+            }
+        }
+
+        // Fallback to JSON parse if model returned JSON
+        if (!ansMatch && cleanText.trim().startsWith('{')) {
+            return parseAiJson(cleanText, {
+                answer: cleanText,
+                reasoning: 'Reasoning provided.',
+                suggestedFollowUps: [],
+            });
+        }
+
+        return {
+            answer: sanitizeClinicalAnswerText(answer),
+            reasoning: sanitizeClinicalAnswerText(reasoning),
+            suggestedFollowUps: suggestedFollowUps.slice(0, 4),
+        };
     },
 
     /**
@@ -1482,7 +1519,7 @@ ${getAudienceDirective(audienceMode)}
 
 **Adaptive Domain & Subject Matter Guidance:**
 - If the slide is medical, provide clinical education.
-- If you see any request, question, or attached document/image which is unrelated to the medical topic (e.g. engineering, mathematics, physics, computer science, UPSC/civil services, humanities, general knowledge), then shift your thinking from medicine to the attached query's Subject Matter Expert (SME) and answer with high authority, precision, and pedagogical clarity while strictly maintaining the JSON formatting schema so that visual output is not hampered.
+- If you see any request, question, or attached document/image which is unrelated to the medical topic (e.g. engineering, mathematics, physics, computer science, UPSC/civil services, humanities, general knowledge), then shift your thinking from medicine to the attached query's Subject Matter Expert (SME) and answer with high authority, precision, and pedagogical clarity in Markdown format.
 
 **Presentation Main Topic:** ${params.presentationTopic}
 **Current Slide Title:** ${params.slideTitle}
@@ -1495,24 +1532,58 @@ ${params.slideSummary ? `**Slide Summary:** ${params.slideSummary}` : ''}
 **Instructions:**
 1. Provide a clear, engaging answer specific to this slide's domain in the chosen language and audience style. If images/documents are attached, analyze them in this context.
 2. If in Simplified mode, explain the core concept from first principles with vivid analogies. If in Doctor/Advanced mode, connect concepts to high-level theory, practical applications, and exam pearls.
-3. Output valid JSON:
-{
-  "answer": "Detailed answer explaining the concept with clear formatting.",
-  "reasoning": "Deeper mechanism / theoretical or analytical context.",
-  "clinicalPearls": [
-    "${audienceMode === 'simplified' ? 'Fascinating first-principle insight 1' : 'High-yield domain pearl / exam tip 1'}",
-    "${audienceMode === 'simplified' ? 'Fascinating first-principle insight 2' : 'High-yield domain pearl / exam tip 2'}"
-  ]
-}
+3. Output strictly in Markdown:
+
+## Answer
+[Detailed answer explaining the concept with clear markdown formatting]
+
+## Underlying Rationale
+[Deeper mechanism / theoretical or analytical context]
+
+## Domain Pearls
+- ${audienceMode === 'simplified' ? 'Fascinating first-principle insight 1' : 'High-yield domain pearl / exam tip 1'}
+- ${audienceMode === 'simplified' ? 'Fascinating first-principle insight 2' : 'High-yield domain pearl / exam tip 2'}
 `;
 
         const text = await this._runPrompt(apiKeyOrConfig, prompt, params.images, params.onStreamChunk, { signal: params.signal });
 
-        return parseAiJson(text, {
-            answer: text,
-            reasoning: 'Educational rationale.',
-            clinicalPearls: [],
-        });
+        const { cleanText } = stripThinkingTags(text || '');
+
+        let answer = cleanText;
+        let reasoning = 'Educational rationale.';
+        const clinicalPearls: string[] = [];
+
+        const ansMatch = cleanText.match(/##\s+Answer\s*([\s\S]*?)(?=##\s+Underlying Rationale|##\s+Domain Pearls|$)/i);
+        const reasonMatch = cleanText.match(/##\s+Underlying Rationale\s*([\s\S]*?)(?=##\s+Domain Pearls|$)/i);
+        const pearlsMatch = cleanText.match(/##\s+Domain Pearls\s*([\s\S]*?)$/i);
+
+        if (ansMatch && ansMatch[1]?.trim()) {
+            answer = ansMatch[1].trim();
+        }
+        if (reasonMatch && reasonMatch[1]?.trim()) {
+            reasoning = reasonMatch[1].trim();
+        }
+        if (pearlsMatch && pearlsMatch[1]?.trim()) {
+            const lines = pearlsMatch[1].trim().split('\n');
+            for (const l of lines) {
+                const p = l.replace(/^[-*•\d\.\)]+\s*/, '').trim();
+                if (p) clinicalPearls.push(p);
+            }
+        }
+
+        if (!ansMatch && cleanText.trim().startsWith('{')) {
+            return parseAiJson(cleanText, {
+                answer: cleanText,
+                reasoning: 'Educational rationale.',
+                clinicalPearls: [],
+            });
+        }
+
+        return {
+            answer: sanitizeClinicalAnswerText(answer),
+            reasoning: sanitizeClinicalAnswerText(reasoning),
+            clinicalPearls,
+        };
     },
 
     /**
@@ -1541,34 +1612,100 @@ ${getAudienceDirective(audienceMode)}
 
 **Adaptive Domain & Subject Matter Guidance:**
 - If the inquiry, case presentation, or attached files are medical or clinical, provide high-level clinical guidance and differential analysis.
-- CRITICAL: If you see any request, question, or attached document/image which is unrelated to the medical topic which doesn't require MBBS or PG level attention (e.g. engineering, mathematics, computer science, physics, chemistry, competitive exams like UPSC/GATE/NEET, history, economics, philosophy, general knowledge, or daily questions), then shift your thinking from this unrelated medical topic to the attached query's Subject Matter Expert (SME) and answer the question accordingly and thoroughly, but by strictly maintaining the JSON formatting schema so that output should not get hampered in visual way.
+- CRITICAL: If you see any request, question, or attached document/image which is unrelated to the medical topic which doesn't require MBBS or PG level attention (e.g. engineering, mathematics, computer science, physics, chemistry, competitive exams like UPSC/GATE/NEET, history, economics, philosophy, general knowledge, or daily questions), then shift your thinking from this unrelated medical topic to the attached query's Subject Matter Expert (SME) and answer the question accordingly and thoroughly in Markdown format.
 
 If audio dictations or voice recordings are attached, listen to the speaker's inquiry or prompt.
 
-**Constraints:**
-1. Output MUST be a valid JSON object.
-2. The object must have:
-   - "topic": Short descriptive subject/topic title in the target language.
-   - "answer": Comprehensive, well-structured explanation with clear formatting, bold concepts, and step-by-step clarity in the target language.
-   - "reasoning": The underlying mechanism, theoretical proof, rationale, or analytical context.
-   - "proactiveQuestions": Array of 3-4 high-yield proactive deep-dive questions related to this topic.
-   - "keyTakeaways": Array of 3 points (high-yield summary points or core takeaways).
+**Required Markdown Output Format:**
+Output strictly in Markdown format as follows (DO NOT output raw JSON):
+
+# Topic: [Short descriptive subject/topic title in the target language]
+
+## Clinical Answer
+[Comprehensive, well-structured explanation with clear formatting, bold concepts, and step-by-step clarity in the target language]
+
+## Underlying Rationale
+[The underlying mechanism, theoretical proof, rationale, or analytical context]
+
+## Key Takeaways
+- [High-yield summary point or core takeaway 1]
+- [High-yield summary point or core takeaway 2]
+- [High-yield summary point or core takeaway 3]
+
+## Proactive Questions
+- [Proactive deep-dive question 1]
+- [Proactive deep-dive question 2]
+- [Proactive deep-dive question 3]
 `;
 
         if (question) prompt += `\n\nQuestion / Inquiry: ${question}`;
 
         const text = await this._runPrompt(apiKeyOrConfig, prompt, images, options?.onStreamChunk, { signal: options?.signal });
 
-        return parseAiJson(text, {
-            answer: text,
-            reasoning: 'Analysis performed by AI model.',
-            topic: 'Subject Analysis',
-            proactiveQuestions: [
+        const { cleanText } = stripThinkingTags(text || '');
+
+        // Try parsing markdown first
+        let topic = 'Subject Analysis';
+        let answer = cleanText;
+        let reasoning = 'Analysis performed by AI model.';
+        const keyTakeaways: string[] = [];
+        const proactiveQuestions: string[] = [];
+
+        const topicMatch = cleanText.match(/^#\s+Topic:\s*(.+)$/im);
+        if (topicMatch && topicMatch[1]?.trim()) {
+            topic = topicMatch[1].trim();
+        }
+
+        const ansMatch = cleanText.match(/##\s+(?:Clinical\s+)?Answer\s*([\s\S]*?)(?=##\s+Underlying Rationale|##\s+Key Takeaways|##\s+Proactive Questions|$)/i);
+        const reasonMatch = cleanText.match(/##\s+Underlying Rationale\s*([\s\S]*?)(?=##\s+Key Takeaways|##\s+Proactive Questions|$)/i);
+        const takeawaysMatch = cleanText.match(/##\s+Key Takeaways\s*([\s\S]*?)(?=##\s+Proactive Questions|$)/i);
+        const proactiveMatch = cleanText.match(/##\s+Proactive Questions\s*([\s\S]*?)$/i);
+
+        if (ansMatch && ansMatch[1]?.trim()) {
+            answer = ansMatch[1].trim();
+        }
+        if (reasonMatch && reasonMatch[1]?.trim()) {
+            reasoning = reasonMatch[1].trim();
+        }
+        if (takeawaysMatch && takeawaysMatch[1]?.trim()) {
+            const lines = takeawaysMatch[1].trim().split('\n');
+            for (const l of lines) {
+                const item = l.replace(/^[-*•\d\.\)]+\s*/, '').trim();
+                if (item) keyTakeaways.push(item);
+            }
+        }
+        if (proactiveMatch && proactiveMatch[1]?.trim()) {
+            const lines = proactiveMatch[1].trim().split('\n');
+            for (const l of lines) {
+                const q = l.replace(/^[-*•\d\.\)]+\s*/, '').trim();
+                if (q) proactiveQuestions.push(q);
+            }
+        }
+
+        // Fallback to JSON parsing if model emitted JSON
+        if (!ansMatch && cleanText.trim().startsWith('{')) {
+            return parseAiJson(cleanText, {
+                answer: cleanText,
+                reasoning: 'Analysis performed by AI model.',
+                topic: 'Subject Analysis',
+                proactiveQuestions: [
+                    'What are the primary underlying principles for this topic?',
+                    'How to approach advanced problem solving in this area?',
+                ],
+                keyTakeaways: [],
+            });
+        }
+
+        return {
+            topic,
+            answer: sanitizeClinicalAnswerText(answer),
+            reasoning: sanitizeClinicalAnswerText(reasoning),
+            proactiveQuestions: proactiveQuestions.length > 0 ? proactiveQuestions : [
                 'What are the primary underlying principles for this topic?',
                 'How to approach advanced problem solving in this area?',
             ],
-            keyTakeaways: [],
-        });
+            keyTakeaways,
+        };
     },
 
     async summarizeQuestion(

@@ -62,17 +62,17 @@ export function cleanLatexForPptx(text: string): string {
 
 /**
  * Formats text with bold parts into the array structure pptxgenjs requires for rich text.
- * Also supports standard markdown **bold** syntax and converts LaTeX equations.
+ * Also supports standard markdown **bold** and __bold__ syntax and converts LaTeX equations.
  */
 function formatTextForPptx(text: string, boldParts: string[] = []): PptxGenJS.TextProps[] {
   if (!text) return [{ text: '' }];
 
   const cleanedText = cleanLatexForPptx(text);
 
-  // 1. Check if markdown **bold** syntax is present
-  if (cleanedText.includes('**')) {
+  // 1. Check if markdown bold syntax (**text** or __text__) is present
+  if (cleanedText.includes('**') || cleanedText.includes('__')) {
     const mdSegments: PptxGenJS.TextProps[] = [];
-    const mdRegex = /\*\*(.*?)\*\*/g;
+    const mdRegex = /(\*\*|__)([\s\S]+?)\1/g;
     let lastIdx = 0;
     let match: RegExpExecArray | null;
 
@@ -80,7 +80,7 @@ function formatTextForPptx(text: string, boldParts: string[] = []): PptxGenJS.Te
       if (match.index > lastIdx) {
         mdSegments.push({ text: cleanedText.slice(lastIdx, match.index), options: { bold: false } });
       }
-      mdSegments.push({ text: match[1], options: { bold: true } });
+      mdSegments.push({ text: match[2], options: { bold: true } });
       lastIdx = match.index + match[0].length;
     }
     if (lastIdx < cleanedText.length) {
