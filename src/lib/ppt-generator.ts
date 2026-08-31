@@ -24,12 +24,21 @@ const TITLE_OPTIONS = {
 export function cleanLatexForPptx(text: string): string {
   if (!text) return '';
   return text
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?[^>]+(>|$)/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
     .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, '$1')
     .replace(/\$\s*([\s\S]*?)\s*\$/g, '$1')
     .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
     .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
     .replace(/\\text\{([^}]+)\}/g, '$1')
+    .replace(/\\mathrm\{([^}]+)\}/g, '$1')
     .replace(/\\mathbf\{([^}]+)\}/g, '$1')
+    .replace(/\\textbf\{([^}]+)\}/g, '$1')
     .replace(/\\mathit\{([^}]+)\}/g, '$1')
     .replace(/\\approx\b/g, '≈')
     .replace(/\\Delta\b/g, 'Δ')
@@ -300,11 +309,14 @@ async function renderTable(
   const headerOptions = { fill: '003366', color: 'FFFFFF', bold: true, fontSize: 11, valign: 'middle' as const };
   const rowOptions = { fontSize: 10, color: '333333', valign: 'top' as const };
 
-  const headerHeight = measureTableRowHeight(content.headers || [], numColumns, true, virtualSlideElement);
+  const cleanedHeaders = (content.headers || []).map((h: string) =>
+    cleanLatexForPptx(h).replace(/(\*\*|__)([\s\S]+?)\1/g, '$2').replace(/(\*|_)([\s\S]+?)\1/g, '$2')
+  );
+  const headerHeight = measureTableRowHeight(cleanedHeaders, numColumns, true, virtualSlideElement);
 
   let rowsForCurrentSlide: any[] = [];
   rowsForCurrentSlide.push(
-    (content.headers || []).map((h: string) => ({ text: h, options: headerOptions }))
+    cleanedHeaders.map((h: string) => ({ text: h, options: headerOptions }))
   );
   let tableHeightOnSlide = headerHeight;
 
@@ -321,7 +333,10 @@ async function renderTable(
   }
 
   for (const row of content.rows || []) {
-    const rowHeight = measureTableRowHeight(row.cells || [], numColumns, false, virtualSlideElement);
+    const cleanedCells = (row.cells || []).map((c: string) =>
+      cleanLatexForPptx(c).replace(/(\*\*|__)([\s\S]+?)\1/g, '$2').replace(/(\*|_)([\s\S]+?)\1/g, '$2')
+    );
+    const rowHeight = measureTableRowHeight(cleanedCells, numColumns, false, virtualSlideElement);
 
     if (startY + tableHeightOnSlide + rowHeight > CONTENT_HEIGHT) {
       // Flush current rows
@@ -347,13 +362,13 @@ async function renderTable(
 
       // Start fresh table on continuation slide with headers
       rowsForCurrentSlide = [
-        (content.headers || []).map((h: string) => ({ text: h, options: headerOptions })),
+        cleanedHeaders.map((h: string) => ({ text: h, options: headerOptions })),
       ];
       tableHeightOnSlide = headerHeight;
     }
 
     rowsForCurrentSlide.push(
-      (row.cells || []).map((c: string) => ({ text: c, options: rowOptions }))
+      cleanedCells.map((c: string) => ({ text: c, options: rowOptions }))
     );
     tableHeightOnSlide += rowHeight;
   }
@@ -384,6 +399,20 @@ async function renderNote(
   virtualSlideElement: HTMLElement
 ) {
   const cleanNote = cleanLatexForPptx((content.text || '').replace(/^Note:\s*/i, ''));
+  const noteSegments = formatTextForPptx(cleanNote);
+  const richText: PptxGenJS.TextProps[] = [
+    { text: '📌 Note: ', options: { bold: true, italic: true, color: 'B45309', fontSize: 11 } },
+    ...noteSegments.map((item) => ({
+      text: item.text,
+      options: {
+        bold: item.options?.bold ?? false,
+        italic: true,
+        color: 'B45309',
+        fontSize: 11,
+      },
+    })),
+  ];
+
   const htmlToMeasure = `<div style="width: 864px; font-size: 11pt; font-style: italic; margin: 0; padding: 4px; font-family: Inter, sans-serif;">Note: ${cleanNote}</div>`;
   const height = measureHeight(htmlToMeasure, virtualSlideElement) + 0.12;
 
@@ -398,14 +427,11 @@ async function renderNote(
     startY = MARGIN_TOP + TITLE_OPTIONS.h + 0.15;
   }
 
-  slide.addText(`Note: ${cleanNote}`, {
+  slide.addText(richText, {
     x: MARGIN_LEFT,
     y: startY,
     w: CONTENT_WIDTH,
     h: height,
-    fontSize: 11,
-    italic: true,
-    color: 'B45309',
     valign: 'top',
   });
 

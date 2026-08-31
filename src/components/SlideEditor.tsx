@@ -81,11 +81,46 @@ interface MarkdownBlock {
 }
 
 function cleanMarkdownForPdf(text: string): string {
+  if (!text) return '';
   return text
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    .replace(/__(.*?)__/g, '$1')
-    .replace(/`(.*?)`/g, '$1');
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?[^>]+(>|$)/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, '$1')
+    .replace(/\$\s*([\s\S]*?)\s*\$/g, '$1')
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
+    .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
+    .replace(/\\text\{([^}]+)\}/g, '$1')
+    .replace(/\\mathrm\{([^}]+)\}/g, '$1')
+    .replace(/\\mathbf\{([^}]+)\}/g, '$1')
+    .replace(/\\textbf\{([^}]+)\}/g, '$1')
+    .replace(/\\mathit\{([^}]+)\}/g, '$1')
+    .replace(/\\propto\b/g, '∝')
+    .replace(/\\approx\b/g, '≈')
+    .replace(/\\Delta\b/g, 'Δ')
+    .replace(/\\pm\b/g, '±')
+    .replace(/\\times\b/g, '×')
+    .replace(/\\cdot\b/g, '·')
+    .replace(/\\alpha\b/g, 'α')
+    .replace(/\\beta\b/g, 'β')
+    .replace(/\\gamma\b/g, 'γ')
+    .replace(/\\theta\b/g, 'θ')
+    .replace(/\\mu\b/g, 'μ')
+    .replace(/\\sigma\b/g, 'σ')
+    .replace(/\\omega\b/g, 'ω')
+    .replace(/\\to\b|\\rightarrow\b/g, '→')
+    .replace(/\\leftarrow\b/g, '←')
+    .replace(/(\*\*|__)([\s\S]+?)\1/g, '$2')
+    .replace(/(\*|_)([\s\S]+?)\1/g, '$2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/~~(.*?)~~/g, '$1')
+    .replace(/^\s*[-*•]\s+/gm, '')
+    .trim();
 }
 
 function parseDocxTextRuns(text: string, defaultBold = false, defaultItalic = false): TextRun[] {
@@ -116,7 +151,9 @@ function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
   const flushParagraph = () => {
     if (currentParagraph.length > 0) {
       const text = currentParagraph.join(' ').trim();
-      if (text) blocks.push({ type: 'paragraph', text });
+      if (text && !/^(---|___|\*\*\*)$/.test(text)) {
+        blocks.push({ type: 'paragraph', text });
+      }
       currentParagraph = [];
     }
   };
@@ -138,22 +175,22 @@ function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
   const flushTable = () => {
     if (tableLines.length >= 2) {
       const parseRow = (line: string) => {
-        return line
-          .split('|')
-          .map((c) => c.trim())
-          .filter((_, idx, arr) => (idx > 0 && idx < arr.length - 1) || (idx === 0 && !line.startsWith('|')));
+        let clean = line.trim();
+        if (clean.startsWith('|')) clean = clean.slice(1);
+        if (clean.endsWith('|')) clean = clean.slice(0, -1);
+        return clean.split('|').map((c) => c.trim());
       };
 
       const rawHeaders = parseRow(tableLines[0]);
       const dataRows: string[][] = [];
 
       for (let j = 1; j < tableLines.length; j++) {
-        const rowLine = tableLines[j];
-        if (/^\s*\|?\s*[-:]+[-| :]*\|?\s*$/.test(rowLine)) {
+        const rowLine = tableLines[j].trim();
+        if (/^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(rowLine)) {
           continue;
         }
         const cells = parseRow(rowLine);
-        if (cells.length > 0) {
+        if (cells.length > 0 && cells.some((c) => c.length > 0)) {
           dataRows.push(cells);
         }
       }
@@ -161,11 +198,19 @@ function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
       if (rawHeaders.length > 0 && dataRows.length > 0) {
         blocks.push({ type: 'table', headers: rawHeaders, rows: dataRows });
       } else {
-        tableLines.forEach((tl) => currentParagraph.push(tl));
+        tableLines.forEach((tl) => {
+          if (!/^(---|___|\*\*\*)$/.test(tl.trim())) {
+            currentParagraph.push(tl);
+          }
+        });
       }
       tableLines = [];
     } else {
-      tableLines.forEach((tl) => currentParagraph.push(tl));
+      tableLines.forEach((tl) => {
+        if (!/^(---|___|\*\*\*)$/.test(tl.trim())) {
+          currentParagraph.push(tl);
+        }
+      });
       tableLines = [];
     }
   };
@@ -182,7 +227,15 @@ function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
       continue;
     }
 
-    if (trimmed.startsWith('|') && trimmed.includes('|', 1)) {
+    if (/^(---|___|\*\*\*)$/.test(trimmed)) {
+      flushParagraph();
+      flushBullets();
+      flushNumbered();
+      flushTable();
+      continue;
+    }
+
+    if (trimmed.includes('|') && (trimmed.startsWith('|') || trimmed.split('|').length >= 3)) {
       flushParagraph();
       flushBullets();
       flushNumbered();
@@ -632,13 +685,15 @@ export function SlideEditor({
         doc.setFontSize(14.5);
         doc.setTextColor(30, 58, 138); // Navy
         doc.setFont('NotoSans', 'bold');
-        const titleLines = doc.splitTextToSize(slide.title, contentWidth);
+        const cleanTitle = cleanMarkdownForPdf(slide.title);
+        const titleLines = doc.splitTextToSize(cleanTitle, contentWidth);
         doc.text(titleLines, margin, currentY);
         currentY += titleLines.length * 6 + 3.5;
 
         // 3. Optional Slide Context Summary Subtitle
         if (slide.summary) {
-          const summaryLines = doc.splitTextToSize(slide.summary, contentWidth - 8);
+          const cleanSummary = cleanMarkdownForPdf(slide.summary);
+          const summaryLines = doc.splitTextToSize(cleanSummary, contentWidth - 8);
           const summaryHeight = summaryLines.length * 4.5 + 4;
 
           doc.setFillColor(248, 250, 252);
@@ -659,7 +714,8 @@ export function SlideEditor({
           if (item.type === 'paragraph') {
             doc.setFont('NotoSans', 'normal');
             doc.setFontSize(10);
-            const pLines = doc.splitTextToSize(item.text, contentWidth - 10);
+            const cleanP = cleanMarkdownForPdf(item.text);
+            const pLines = doc.splitTextToSize(cleanP, contentWidth - 10);
             const boxHeight = pLines.length * 5.2 + 8;
 
             if (currentY + boxHeight > pageHeight - margin - 10) addNewPage();
@@ -679,10 +735,13 @@ export function SlideEditor({
             const items = item.items || [];
             if (items.length > 0) {
               doc.setFont('NotoSans', 'normal');
-              const parsedItems = items.map((listItem) => ({
-                text: listItem.text,
-                lines: doc.splitTextToSize(listItem.text, contentWidth - 14),
-              }));
+              const parsedItems = items.map((listItem) => {
+                const cleanItem = cleanMarkdownForPdf(listItem.text);
+                return {
+                  text: cleanItem,
+                  lines: doc.splitTextToSize(cleanItem, contentWidth - 14),
+                };
+              });
 
               const totalLineCount = parsedItems.reduce((acc, it) => acc + it.lines.length, 0);
               const boxHeight = totalLineCount * 5.2 + parsedItems.length * 2.5 + 6;
@@ -721,10 +780,13 @@ export function SlideEditor({
             }
           } else if (item.type === 'table') {
             if (currentY > pageHeight - 45) addNewPage();
+            const cleanHeaders = (item.headers || []).map((h) => cleanMarkdownForPdf(h));
+            const cleanRows = (item.rows || []).map((r) => (r.cells || []).map((c) => cleanMarkdownForPdf(c)));
+
             (doc as any).autoTable({
               startY: currentY,
-              head: [item.headers],
-              body: (item.rows || []).map((r) => r.cells),
+              head: [cleanHeaders],
+              body: cleanRows,
               margin: { left: margin, right: margin },
               theme: 'grid',
               styles: {
@@ -748,7 +810,7 @@ export function SlideEditor({
               ? (doc as any).lastAutoTable.finalY + 6
               : currentY + 15;
           } else if (item.type === 'note') {
-            const cleanNote = item.text.replace(/^Note:\s*/i, '');
+            const cleanNote = cleanMarkdownForPdf(item.text.replace(/^Note:\s*/i, ''));
             doc.setFontSize(8.5);
             const noteLines = doc.splitTextToSize(cleanNote, contentWidth - 8);
             const noteHeight = noteLines.length * 4.5 + 9;
@@ -777,7 +839,7 @@ export function SlideEditor({
         if (slide.clinicalPearls && slide.clinicalPearls.length > 0) {
           doc.setFontSize(8);
           const pearlLinesArr = slide.clinicalPearls.map((p) =>
-            doc.splitTextToSize(`• ${p}`, contentWidth - 10)
+            doc.splitTextToSize(`• ${cleanMarkdownForPdf(p)}`, contentWidth - 10)
           );
           const totalLines = pearlLinesArr.reduce((acc, lines) => acc + lines.length, 0);
           const boxHeight = totalLines * 4.2 + 9;
@@ -890,34 +952,30 @@ export function SlideEditor({
         });
       }
 
-      function renderPdfDiscussionItem(q: string, a: string, reasoning?: string, subtitle?: string) {
-        if (currentY > pageHeight - 35) addNewPage();
+      function renderPdfMarkdownBlocks(
+        markdownText: string,
+        options: {
+          textColor?: [number, number, number];
+          bulletColor?: [number, number, number];
+          tableHeaderColor?: [number, number, number];
+          isItalic?: boolean;
+        } = {}
+      ) {
+        const {
+          textColor = [30, 41, 59],
+          bulletColor = [30, 58, 138],
+          tableHeaderColor = [30, 58, 138],
+          isItalic = false,
+        } = options;
 
-        // Question Box
-        doc.setFont('NotoSans', 'bold');
-        doc.setFontSize(8.5);
-        const qPrefix = subtitle ? `Q (${subtitle}): ` : 'Q: ';
-        const qLines = doc.splitTextToSize(`${qPrefix}${cleanMarkdownForPdf(q)}`, contentWidth - 10);
-        const qBoxHeight = qLines.length * 4.6 + 6;
-
-        if (currentY + qBoxHeight > pageHeight - margin - 10) addNewPage();
-
-        doc.setFillColor(240, 244, 255); // Indigo/Blue 50
-        doc.setDrawColor(199, 210, 254); // Indigo 200
-        doc.roundedRect(margin, currentY, contentWidth, qBoxHeight, 1.5, 1.5, 'FD');
-
-        doc.setTextColor(30, 58, 138); // Navy 900
-        doc.text(qLines, margin + 4, currentY + 4.8);
-        currentY += qBoxHeight + 2.5;
-
-        // Answer Markdown Blocks
-        const blocks = parseMarkdownBlocks(a);
+        const blocks = parseMarkdownBlocks(markdownText);
         for (const block of blocks) {
           if (block.type === 'paragraph' && block.text) {
-            doc.setFont('NotoSans', 'normal');
+            doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
             doc.setFontSize(8.5);
-            doc.setTextColor(30, 41, 59);
+            doc.setTextColor(textColor[0], textColor[1], textColor[2]);
             const cleanP = cleanMarkdownForPdf(block.text);
+            if (!cleanP) continue;
             const pLines = doc.splitTextToSize(cleanP, contentWidth - 8);
             const pHeight = pLines.length * 4.4;
 
@@ -929,17 +987,18 @@ export function SlideEditor({
               doc.setFont('NotoSans', 'normal');
               doc.setFontSize(8.5);
               const cleanItem = cleanMarkdownForPdf(itemText);
+              if (!cleanItem) continue;
               const itemLines = doc.splitTextToSize(cleanItem, contentWidth - 14);
               const itHeight = itemLines.length * 4.4;
 
               if (currentY + itHeight > pageHeight - margin - 10) addNewPage();
 
               doc.setFont('NotoSans', 'bold');
-              doc.setTextColor(30, 58, 138);
+              doc.setTextColor(bulletColor[0], bulletColor[1], bulletColor[2]);
               doc.text('•', margin + 4, currentY + 3.8);
 
-              doc.setFont('NotoSans', 'normal');
-              doc.setTextColor(30, 41, 59);
+              doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
+              doc.setTextColor(textColor[0], textColor[1], textColor[2]);
               doc.text(itemLines, margin + 8.5, currentY + 3.8);
               currentY += itHeight + 2;
             }
@@ -949,27 +1008,31 @@ export function SlideEditor({
               doc.setFont('NotoSans', 'normal');
               doc.setFontSize(8.5);
               const cleanItem = cleanMarkdownForPdf(itemText);
+              if (!cleanItem) continue;
               const itemLines = doc.splitTextToSize(cleanItem, contentWidth - 16);
               const itHeight = itemLines.length * 4.4;
 
               if (currentY + itHeight > pageHeight - margin - 10) addNewPage();
 
               doc.setFont('NotoSans', 'bold');
-              doc.setTextColor(30, 58, 138);
+              doc.setTextColor(bulletColor[0], bulletColor[1], bulletColor[2]);
               doc.text(`${idx + 1}.`, margin + 3.5, currentY + 3.8);
 
-              doc.setFont('NotoSans', 'normal');
-              doc.setTextColor(30, 41, 59);
+              doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
+              doc.setTextColor(textColor[0], textColor[1], textColor[2]);
               doc.text(itemLines, margin + 9, currentY + 3.8);
               currentY += itHeight + 2;
             });
             currentY += 1.5;
           } else if (block.type === 'table' && block.headers && block.rows) {
             if (currentY > pageHeight - 45) addNewPage();
+            const cleanHeaders = block.headers.map((h) => cleanMarkdownForPdf(h));
+            const cleanRows = block.rows.map((row) => row.map((cell) => cleanMarkdownForPdf(cell)));
+
             (doc as any).autoTable({
               startY: currentY + 1,
-              head: [block.headers],
-              body: block.rows,
+              head: [cleanHeaders],
+              body: cleanRows,
               margin: { left: margin, right: margin },
               theme: 'grid',
               styles: {
@@ -980,7 +1043,7 @@ export function SlideEditor({
                 textColor: [30, 41, 59],
               },
               headStyles: {
-                fillColor: [30, 58, 138],
+                fillColor: tableHeaderColor,
                 textColor: 255,
                 fontStyle: 'bold',
                 fontSize: 8.5,
@@ -994,32 +1057,61 @@ export function SlideEditor({
               : currentY + 15;
           }
         }
+      }
+
+      function renderPdfDiscussionItem(q: string, a: string, reasoning?: string, subtitle?: string) {
+        if (currentY > pageHeight - 35) addNewPage();
+
+        // Question Box
+        doc.setFont('NotoSans', 'bold');
+        doc.setFontSize(8.5);
+        const qPrefix = subtitle ? `Q (${cleanMarkdownForPdf(subtitle)}): ` : 'Q: ';
+        const cleanQ = cleanMarkdownForPdf(q);
+        const qLines = doc.splitTextToSize(`${qPrefix}${cleanQ}`, contentWidth - 10);
+        const qBoxHeight = qLines.length * 4.6 + 6;
+
+        if (currentY + qBoxHeight > pageHeight - margin - 10) addNewPage();
+
+        doc.setFillColor(240, 244, 255); // Indigo/Blue 50
+        doc.setDrawColor(199, 210, 254); // Indigo 200
+        doc.roundedRect(margin, currentY, contentWidth, qBoxHeight, 1.5, 1.5, 'FD');
+
+        doc.setTextColor(30, 58, 138); // Navy 900
+        doc.text(qLines, margin + 4, currentY + 4.8);
+        currentY += qBoxHeight + 2.5;
+
+        // Render Answer Markdown Blocks
+        renderPdfMarkdownBlocks(a, {
+          textColor: [30, 41, 59],
+          bulletColor: [30, 58, 138],
+          tableHeaderColor: [30, 58, 138],
+        });
 
         // Rationale container if available
-        if (reasoning) {
-          doc.setFont('NotoSans', 'italic');
-          doc.setFontSize(8);
-          const cleanR = cleanMarkdownForPdf(reasoning);
-          const rLines = doc.splitTextToSize(cleanR, contentWidth - 12);
-          const rBoxHeight = rLines.length * 4.2 + 9;
+        if (reasoning && reasoning.trim()) {
+          if (currentY > pageHeight - 35) addNewPage();
 
-          if (currentY + rBoxHeight > pageHeight - margin - 10) addNewPage();
-
-          doc.setFillColor(254, 252, 232); // Amber 50
-          doc.setDrawColor(253, 224, 71); // Amber 300
-          doc.roundedRect(margin, currentY, contentWidth, rBoxHeight, 1.5, 1.5, 'FD');
+          // Rationale Header Banner
+          doc.setFillColor(254, 243, 199); // Amber 100
+          doc.setDrawColor(251, 191, 36); // Amber 400
+          doc.roundedRect(margin, currentY, contentWidth, 6.5, 1, 1, 'FD');
 
           doc.setFont('NotoSans', 'bold');
-          doc.setTextColor(180, 83, 9); // Amber 700
-          doc.text('💡 Teaching Rationale & Clinical Pearls', margin + 4, currentY + 4.8);
+          doc.setFontSize(8);
+          doc.setTextColor(146, 64, 14); // Amber 800
+          doc.text('💡 Teaching Rationale & Clinical Pearls', margin + 4, currentY + 4.5);
+          currentY += 8.5;
 
-          doc.setFont('NotoSans', 'normal');
-          doc.setTextColor(120, 53, 15); // Amber 900
-          doc.text(rLines, margin + 4, currentY + 9);
-          currentY += rBoxHeight + 4;
-        } else {
-          currentY += 2;
+          // Render rationale markdown blocks with Amber/Gold styling
+          renderPdfMarkdownBlocks(reasoning, {
+            textColor: [120, 53, 15], // Amber 900
+            bulletColor: [180, 83, 9], // Amber 700
+            tableHeaderColor: [180, 83, 9], // Amber 700
+            isItalic: false,
+          });
         }
+
+        currentY += 2.5;
       }
 
       // 9. Add Footers and Page Numbers to all pages
