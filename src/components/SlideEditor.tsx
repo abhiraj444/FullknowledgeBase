@@ -59,7 +59,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { Label } from './ui/label';
 import { cn } from '@/lib/utils';
-import type { Slide } from '@/types';
+import type { Slide, FollowUpThread } from '@/types';
 import { registerNotoSansRegular } from '@/lib/pdf-fonts/NotoSansRegular';
 import EnhancedSlideRenderer from './EnhancedSlideRenderer';
 import { registerNotoSansBold } from '@/lib/pdf-fonts/NotoSansBold';
@@ -71,6 +71,155 @@ import PptxGenJS from 'pptxgenjs';
 import { AiStreamingRawLogBox } from './AiStreamingRawLogBox';
 
 export type { Slide };
+
+interface MarkdownBlock {
+  type: 'paragraph' | 'bullet_list' | 'numbered_list' | 'table';
+  text?: string;
+  items?: string[];
+  headers?: string[];
+  rows?: string[][];
+}
+
+function cleanMarkdownForPdf(text: string): string {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/`(.*?)`/g, '$1');
+}
+
+function parseDocxTextRuns(text: string, defaultBold = false, defaultItalic = false): TextRun[] {
+  const runs: TextRun[] = [];
+  const parts = text.split(/(\*\*.*?\*\*|\*.*?\*)/g);
+  for (const part of parts) {
+    if (!part) continue;
+    if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
+      runs.push(new TextRun({ text: part.slice(2, -2), bold: true, italics: defaultItalic }));
+    } else if (part.startsWith('*') && part.endsWith('*') && part.length >= 2) {
+      runs.push(new TextRun({ text: part.slice(1, -1), bold: defaultBold, italics: true }));
+    } else {
+      runs.push(new TextRun({ text: part, bold: defaultBold, italics: defaultItalic }));
+    }
+  }
+  return runs.length > 0 ? runs : [new TextRun({ text, bold: defaultBold, italics: defaultItalic })];
+}
+
+function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
+  if (!markdown) return [];
+  const lines = markdown.split('\n');
+  const blocks: MarkdownBlock[] = [];
+  let currentParagraph: string[] = [];
+  let currentBullets: string[] = [];
+  let currentNumbered: string[] = [];
+  let tableLines: string[] = [];
+
+  const flushParagraph = () => {
+    if (currentParagraph.length > 0) {
+      const text = currentParagraph.join(' ').trim();
+      if (text) blocks.push({ type: 'paragraph', text });
+      currentParagraph = [];
+    }
+  };
+
+  const flushBullets = () => {
+    if (currentBullets.length > 0) {
+      blocks.push({ type: 'bullet_list', items: [...currentBullets] });
+      currentBullets = [];
+    }
+  };
+
+  const flushNumbered = () => {
+    if (currentNumbered.length > 0) {
+      blocks.push({ type: 'numbered_list', items: [...currentNumbered] });
+      currentNumbered = [];
+    }
+  };
+
+  const flushTable = () => {
+    if (tableLines.length >= 2) {
+      const parseRow = (line: string) => {
+        return line
+          .split('|')
+          .map((c) => c.trim())
+          .filter((_, idx, arr) => (idx > 0 && idx < arr.length - 1) || (idx === 0 && !line.startsWith('|')));
+      };
+
+      const rawHeaders = parseRow(tableLines[0]);
+      const dataRows: string[][] = [];
+
+      for (let j = 1; j < tableLines.length; j++) {
+        const rowLine = tableLines[j];
+        if (/^\s*\|?\s*[-:]+[-| :]*\|?\s*$/.test(rowLine)) {
+          continue;
+        }
+        const cells = parseRow(rowLine);
+        if (cells.length > 0) {
+          dataRows.push(cells);
+        }
+      }
+
+      if (rawHeaders.length > 0 && dataRows.length > 0) {
+        blocks.push({ type: 'table', headers: rawHeaders, rows: dataRows });
+      } else {
+        tableLines.forEach((tl) => currentParagraph.push(tl));
+      }
+      tableLines = [];
+    } else {
+      tableLines.forEach((tl) => currentParagraph.push(tl));
+      tableLines = [];
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i];
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) {
+      flushParagraph();
+      flushBullets();
+      flushNumbered();
+      flushTable();
+      continue;
+    }
+
+    if (trimmed.startsWith('|') && trimmed.includes('|', 1)) {
+      flushParagraph();
+      flushBullets();
+      flushNumbered();
+      tableLines.push(trimmed);
+      continue;
+    } else if (tableLines.length > 0) {
+      flushTable();
+    }
+
+    if (/^[\*\-•]\s+/.test(trimmed)) {
+      flushParagraph();
+      flushNumbered();
+      currentBullets.push(trimmed.replace(/^[\*\-•]\s+/, ''));
+      continue;
+    } else if (currentBullets.length > 0) {
+      flushBullets();
+    }
+
+    if (/^\d+[\.\)]\s+/.test(trimmed)) {
+      flushParagraph();
+      flushBullets();
+      currentNumbered.push(trimmed.replace(/^\d+[\.\)]\s+/, ''));
+      continue;
+    } else if (currentNumbered.length > 0) {
+      flushNumbered();
+    }
+
+    currentParagraph.push(trimmed);
+  }
+
+  flushParagraph();
+  flushBullets();
+  flushNumbered();
+  flushTable();
+
+  return blocks;
+}
 
 // SortableItem component cleanly passing attributes without leaking invalid props
 const SortableSlideItem = ({
@@ -111,6 +260,7 @@ export function SlideEditor({
   outline,
   initialSuggestedTopics,
   onNewCase,
+  followUpThreads,
 }: {
   initialSlides: Slide[];
   topic: string;
@@ -122,6 +272,7 @@ export function SlideEditor({
   outline?: string[];
   initialSuggestedTopics?: string[];
   onNewCase?: () => void;
+  followUpThreads?: FollowUpThread[];
 }) {
   const [slides, setSlides] = useState<Slide[]>(initialSlides);
   const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
@@ -658,7 +809,7 @@ export function SlideEditor({
         if (slide.proactiveQuestions && slide.proactiveQuestions.length > 0) {
           doc.setFontSize(8);
           const qLinesArr = slide.proactiveQuestions.map((q, qIdx) =>
-            doc.splitTextToSize(`Q${qIdx + 1}: ${q}`, contentWidth - 10)
+            doc.splitTextToSize(`Q${qIdx + 1}: ${cleanMarkdownForPdf(q)}`, contentWidth - 10)
           );
           const totalQCount = qLinesArr.reduce((acc, lines) => acc + lines.length, 0);
           const boxHeight = totalQCount * 4.2 + 9;
@@ -685,9 +836,193 @@ export function SlideEditor({
 
           currentY += boxHeight + 4;
         }
+
+        // 7. In-Slide Viva Q&A & Bedside Inquiries History (if present on slide)
+        if (slide.discussions && slide.discussions.length > 0) {
+          if (currentY > pageHeight - 40) addNewPage();
+
+          doc.setFont('NotoSans', 'bold');
+          doc.setFontSize(8.5);
+          doc.setTextColor(30, 58, 138);
+          doc.text(`💬 In-Slide Viva Discussions & Clarifications (${slide.discussions.length})`, margin, currentY);
+          currentY += 4.5;
+
+          slide.discussions.forEach((disc) => {
+            renderPdfDiscussionItem(disc.q, disc.a, disc.reasoning);
+          });
+        }
       });
 
-      // 7. Add Footers and Page Numbers to all pages
+      // 8. Case-Level Interactive Follow-Up Inquiries & Discussions
+      if (followUpThreads && followUpThreads.length > 0) {
+        addNewPage();
+
+        doc.setFillColor(30, 58, 138); // Navy Blue
+        doc.rect(margin, currentY, contentWidth, 1.2, 'F');
+        currentY += 5;
+
+        // Badge
+        doc.setFillColor(238, 242, 255); // Indigo 50
+        doc.setDrawColor(199, 210, 254); // Indigo 200
+        doc.roundedRect(margin, currentY - 3, 40, 5.5, 1, 1, 'FD');
+
+        doc.setFont('NotoSans', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(67, 56, 202); // Indigo 700
+        doc.text('CLINICAL INQUIRIES', margin + 2.5, currentY + 0.8);
+
+        currentY += 6.5;
+
+        doc.setFontSize(13);
+        doc.setTextColor(30, 58, 138);
+        doc.setFont('NotoSans', 'bold');
+        doc.text('Interactive Follow-Up Discussions & Case Inquiries', margin, currentY);
+        currentY += 6;
+
+        doc.setFont('NotoSans', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(100, 116, 139);
+        doc.text('Comprehensive record of clinical follow-up Q&A, pathophysiology clarifications, and guideline deep-dives.', margin, currentY);
+        currentY += 6;
+
+        followUpThreads.forEach((thread) => {
+          renderPdfDiscussionItem(thread.question, thread.answer, thread.reasoning, thread.slideTitle);
+        });
+      }
+
+      function renderPdfDiscussionItem(q: string, a: string, reasoning?: string, subtitle?: string) {
+        if (currentY > pageHeight - 35) addNewPage();
+
+        // Question Box
+        doc.setFont('NotoSans', 'bold');
+        doc.setFontSize(8.5);
+        const qPrefix = subtitle ? `Q (${subtitle}): ` : 'Q: ';
+        const qLines = doc.splitTextToSize(`${qPrefix}${cleanMarkdownForPdf(q)}`, contentWidth - 10);
+        const qBoxHeight = qLines.length * 4.6 + 6;
+
+        if (currentY + qBoxHeight > pageHeight - margin - 10) addNewPage();
+
+        doc.setFillColor(240, 244, 255); // Indigo/Blue 50
+        doc.setDrawColor(199, 210, 254); // Indigo 200
+        doc.roundedRect(margin, currentY, contentWidth, qBoxHeight, 1.5, 1.5, 'FD');
+
+        doc.setTextColor(30, 58, 138); // Navy 900
+        doc.text(qLines, margin + 4, currentY + 4.8);
+        currentY += qBoxHeight + 2.5;
+
+        // Answer Markdown Blocks
+        const blocks = parseMarkdownBlocks(a);
+        for (const block of blocks) {
+          if (block.type === 'paragraph' && block.text) {
+            doc.setFont('NotoSans', 'normal');
+            doc.setFontSize(8.5);
+            doc.setTextColor(30, 41, 59);
+            const cleanP = cleanMarkdownForPdf(block.text);
+            const pLines = doc.splitTextToSize(cleanP, contentWidth - 8);
+            const pHeight = pLines.length * 4.4;
+
+            if (currentY + pHeight > pageHeight - margin - 10) addNewPage();
+            doc.text(pLines, margin + 3, currentY + 3.8);
+            currentY += pHeight + 2.5;
+          } else if (block.type === 'bullet_list' && block.items) {
+            for (const itemText of block.items) {
+              doc.setFont('NotoSans', 'normal');
+              doc.setFontSize(8.5);
+              const cleanItem = cleanMarkdownForPdf(itemText);
+              const itemLines = doc.splitTextToSize(cleanItem, contentWidth - 14);
+              const itHeight = itemLines.length * 4.4;
+
+              if (currentY + itHeight > pageHeight - margin - 10) addNewPage();
+
+              doc.setFont('NotoSans', 'bold');
+              doc.setTextColor(30, 58, 138);
+              doc.text('•', margin + 4, currentY + 3.8);
+
+              doc.setFont('NotoSans', 'normal');
+              doc.setTextColor(30, 41, 59);
+              doc.text(itemLines, margin + 8.5, currentY + 3.8);
+              currentY += itHeight + 2;
+            }
+            currentY += 1.5;
+          } else if (block.type === 'numbered_list' && block.items) {
+            block.items.forEach((itemText, idx) => {
+              doc.setFont('NotoSans', 'normal');
+              doc.setFontSize(8.5);
+              const cleanItem = cleanMarkdownForPdf(itemText);
+              const itemLines = doc.splitTextToSize(cleanItem, contentWidth - 16);
+              const itHeight = itemLines.length * 4.4;
+
+              if (currentY + itHeight > pageHeight - margin - 10) addNewPage();
+
+              doc.setFont('NotoSans', 'bold');
+              doc.setTextColor(30, 58, 138);
+              doc.text(`${idx + 1}.`, margin + 3.5, currentY + 3.8);
+
+              doc.setFont('NotoSans', 'normal');
+              doc.setTextColor(30, 41, 59);
+              doc.text(itemLines, margin + 9, currentY + 3.8);
+              currentY += itHeight + 2;
+            });
+            currentY += 1.5;
+          } else if (block.type === 'table' && block.headers && block.rows) {
+            if (currentY > pageHeight - 45) addNewPage();
+            (doc as any).autoTable({
+              startY: currentY + 1,
+              head: [block.headers],
+              body: block.rows,
+              margin: { left: margin, right: margin },
+              theme: 'grid',
+              styles: {
+                font: 'NotoSans',
+                fontSize: 8,
+                cellPadding: 2.5,
+                overflow: 'linebreak',
+                textColor: [30, 41, 59],
+              },
+              headStyles: {
+                fillColor: [30, 58, 138],
+                textColor: 255,
+                fontStyle: 'bold',
+                fontSize: 8.5,
+              },
+              alternateRowStyles: {
+                fillColor: [248, 250, 252],
+              },
+            });
+            currentY = (doc as any).lastAutoTable?.finalY
+              ? (doc as any).lastAutoTable.finalY + 4
+              : currentY + 15;
+          }
+        }
+
+        // Rationale container if available
+        if (reasoning) {
+          doc.setFont('NotoSans', 'italic');
+          doc.setFontSize(8);
+          const cleanR = cleanMarkdownForPdf(reasoning);
+          const rLines = doc.splitTextToSize(cleanR, contentWidth - 12);
+          const rBoxHeight = rLines.length * 4.2 + 9;
+
+          if (currentY + rBoxHeight > pageHeight - margin - 10) addNewPage();
+
+          doc.setFillColor(254, 252, 232); // Amber 50
+          doc.setDrawColor(253, 224, 71); // Amber 300
+          doc.roundedRect(margin, currentY, contentWidth, rBoxHeight, 1.5, 1.5, 'FD');
+
+          doc.setFont('NotoSans', 'bold');
+          doc.setTextColor(180, 83, 9); // Amber 700
+          doc.text('💡 Teaching Rationale & Clinical Pearls', margin + 4, currentY + 4.8);
+
+          doc.setFont('NotoSans', 'normal');
+          doc.setTextColor(120, 53, 15); // Amber 900
+          doc.text(rLines, margin + 4, currentY + 9);
+          currentY += rBoxHeight + 4;
+        } else {
+          currentY += 2;
+        }
+      }
+
+      // 9. Add Footers and Page Numbers to all pages
       const totalPages = (doc.internal as any).getNumberOfPages();
       for (let i = 1; i <= totalPages; i++) {
         doc.setPage(i);
@@ -700,7 +1035,7 @@ export function SlideEditor({
         doc.line(margin, pageHeight - 8, pageWidth - margin, pageHeight - 8);
 
         doc.text(`MediGen Slide Studio • ${topic || 'Medical Presentation'}`, margin, pageHeight - 4.5);
-        doc.text(`Slide ${i} of ${totalPages}`, pageWidth - margin - 20, pageHeight - 4.5);
+        doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin - 20, pageHeight - 4.5);
       }
 
       const fileName = `${topic.replace(/\s+/g, '_') || 'medical_presentation'}.pdf`;
@@ -740,6 +1075,120 @@ export function SlideEditor({
     try {
       const docChildren: (Paragraph | Table)[] = [];
 
+      const appendWordDiscussionItem = (
+        q: string,
+        a: string,
+        reasoning?: string,
+        subtitle?: string
+      ) => {
+        const qPrefix = subtitle ? `Q (${subtitle}): ` : 'Q: ';
+        docChildren.push(
+          new Paragraph({
+            children: [
+              new TextRun({ text: qPrefix, bold: true, color: '1E3A8A' }),
+              new TextRun({ text: cleanMarkdownForPdf(q), bold: true }),
+            ],
+            spacing: { before: 140, after: 60 },
+          })
+        );
+
+        const blocks = parseMarkdownBlocks(a);
+        for (const block of blocks) {
+          if (block.type === 'paragraph' && block.text) {
+            docChildren.push(
+              new Paragraph({
+                children: parseDocxTextRuns(block.text),
+                spacing: { after: 80 },
+              })
+            );
+          } else if (block.type === 'bullet_list' && block.items) {
+            block.items.forEach((itemText) => {
+              docChildren.push(
+                new Paragraph({
+                  children: parseDocxTextRuns(itemText),
+                  bullet: { level: 0 },
+                  spacing: { after: 40 },
+                })
+              );
+            });
+          } else if (block.type === 'numbered_list' && block.items) {
+            block.items.forEach((itemText, idx) => {
+              docChildren.push(
+                new Paragraph({
+                  children: [
+                    new TextRun({ text: `${idx + 1}. `, bold: true }),
+                    ...parseDocxTextRuns(itemText),
+                  ],
+                  spacing: { after: 40 },
+                })
+              );
+            });
+          } else if (block.type === 'table' && block.headers && block.rows) {
+            const headerRow = new DocxTableRow({
+              children: block.headers.map(
+                (h) =>
+                  new TableCell({
+                    children: [
+                      new Paragraph({
+                        text: cleanMarkdownForPdf(h),
+                        alignment: AlignmentType.CENTER,
+                      }),
+                    ],
+                    shading: { fill: 'EBF2FA' },
+                  })
+              ),
+              tableHeader: true,
+            });
+            const bodyRows = block.rows.map(
+              (row) =>
+                new DocxTableRow({
+                  children: row.map(
+                    (c) =>
+                      new TableCell({
+                        children: [new Paragraph({ text: cleanMarkdownForPdf(c) })],
+                      })
+                  ),
+                })
+            );
+            docChildren.push(
+              new Table({
+                rows: [headerRow, ...bodyRows],
+                width: { size: 9000, type: 'dxa' },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 1, color: 'D3D3D3' },
+                  bottom: { style: BorderStyle.SINGLE, size: 1, color: 'D3D3D3' },
+                  left: { style: BorderStyle.SINGLE, size: 1, color: 'D3D3D3' },
+                  right: { style: BorderStyle.SINGLE, size: 1, color: 'D3D3D3' },
+                  insideHorizontal: { style: BorderStyle.SINGLE, size: 1, color: 'D3D3D3' },
+                  insideVertical: { style: BorderStyle.SINGLE, size: 1, color: 'D3D3D3' },
+                },
+              })
+            );
+            docChildren.push(new Paragraph({ text: '', spacing: { after: 80 } }));
+          }
+        }
+
+        if (reasoning) {
+          docChildren.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: 'Teaching Rationale: ',
+                  bold: true,
+                  italics: true,
+                  color: 'B45309',
+                }),
+                new TextRun({
+                  text: cleanMarkdownForPdf(reasoning),
+                  italics: true,
+                }),
+              ],
+              spacing: { before: 60, after: 120 },
+            })
+          );
+        }
+      };
+
       slides.forEach((slide) => {
         docChildren.push(
           new Paragraph({
@@ -749,12 +1198,28 @@ export function SlideEditor({
           })
         );
 
+        if (slide.summary) {
+          docChildren.push(
+            new Paragraph({
+              children: [
+                new TextRun({ text: 'Summary: ', bold: true, italics: true, color: '475569' }),
+                new TextRun({ text: slide.summary, italics: true, color: '475569' }),
+              ],
+              spacing: { after: 100 },
+            })
+          );
+        }
+
         slide.content.forEach((item) => {
           if (item.type === 'paragraph') {
             docChildren.push(new Paragraph({ text: item.text, spacing: { after: 100 } }));
           } else if (item.type === 'bullet_list') {
             (item.items || []).forEach((li) => {
               docChildren.push(new Paragraph({ text: li.text, bullet: { level: 0 }, spacing: { after: 50 } }));
+            });
+          } else if (item.type === 'numbered_list') {
+            (item.items || []).forEach((li, lIdx) => {
+              docChildren.push(new Paragraph({ text: `${lIdx + 1}. ${li.text}`, spacing: { after: 50 } }));
             });
           } else if (item.type === 'table') {
             const headerRow = new DocxTableRow({
@@ -768,7 +1233,69 @@ export function SlideEditor({
             docChildren.push(new Paragraph({ children: [new TextRun({ text: 'Clinical Note: ', bold: true, italics: true }), new TextRun({ text: item.text.replace(/^Note:\s*/i, ''), italics: true })], spacing: { after: 100 } }));
           }
         });
+
+        if (slide.clinicalPearls && slide.clinicalPearls.length > 0) {
+          docChildren.push(
+            new Paragraph({
+              children: [new TextRun({ text: 'Clinical Pearls & High-Yield Insights', bold: true, color: '15803D' })],
+              spacing: { before: 120, after: 60 },
+            })
+          );
+          slide.clinicalPearls.forEach((pearl) => {
+            docChildren.push(
+              new Paragraph({
+                text: pearl,
+                bullet: { level: 0 },
+                spacing: { after: 40 },
+              })
+            );
+          });
+        }
+
+        if (slide.proactiveQuestions && slide.proactiveQuestions.length > 0) {
+          docChildren.push(
+            new Paragraph({
+              children: [new TextRun({ text: 'Viva & Board Exam Focus Questions', bold: true, color: '1D4ED8' })],
+              spacing: { before: 120, after: 60 },
+            })
+          );
+          slide.proactiveQuestions.forEach((q, qIdx) => {
+            docChildren.push(
+              new Paragraph({
+                text: `Q${qIdx + 1}: ${q}`,
+                spacing: { after: 40 },
+              })
+            );
+          });
+        }
+
+        if (slide.discussions && slide.discussions.length > 0) {
+          docChildren.push(
+            new Paragraph({
+              text: 'In-Slide Viva & Bedside Clarifications',
+              heading: HeadingLevel.HEADING_2,
+              spacing: { before: 160, after: 80 },
+            })
+          );
+          slide.discussions.forEach((disc) => {
+            appendWordDiscussionItem(disc.q, disc.a, disc.reasoning);
+          });
+        }
       });
+
+      // Append Follow-Up Threads at end of Word Document
+      if (followUpThreads && followUpThreads.length > 0) {
+        docChildren.push(
+          new Paragraph({
+            text: 'Interactive Clinical Follow-Up Inquiries & Discussions',
+            heading: HeadingLevel.HEADING_1,
+            spacing: { before: 300, after: 150 },
+          })
+        );
+        followUpThreads.forEach((thread) => {
+          appendWordDiscussionItem(thread.question, thread.answer, thread.reasoning, thread.slideTitle);
+        });
+      }
 
       const doc = new Document({ sections: [{ children: docChildren }] });
       const blob = await Packer.toBlob(doc);

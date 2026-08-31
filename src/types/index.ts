@@ -39,12 +39,20 @@ export interface TableContent {
 
 export type ContentItem = ParagraphContent | BulletListContent | NumberedListContent | NoteContent | TableContent;
 
+export interface SlideDiscussionItem {
+    q: string;
+    a: string;
+    reasoning?: string;
+    timestamp?: number;
+}
+
 export interface Slide {
     title: string;
     content: ContentItem[];
     summary?: string; // High-yield executive summary of the slide
     clinicalPearls?: string[]; // High-yield medical pearls / viva facts
     proactiveQuestions?: string[]; // Proactive board / deep-dive questions for this slide
+    discussions?: SlideDiscussionItem[]; // In-slide viva Q&A and follow-up discussion history
 }
 
 export interface StructuredQuestion {

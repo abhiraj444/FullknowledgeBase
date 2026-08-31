@@ -1670,6 +1670,7 @@ function ContentGeneratorContent() {
                   outline={presentationOutline || []}
                   initialSuggestedTopics={suggestedTopics}
                   initialUsedTopics={usedTopics}
+                  followUpThreads={followUpThreads}
                   onRefresh={() => handleGeneratePresentation()}
                   onNewCase={handleNewCase}
                   onUpdate={async (data) => {

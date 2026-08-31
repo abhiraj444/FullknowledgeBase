@@ -402,12 +402,21 @@ export const EnhancedSlideRenderer: React.FC<EnhancedSlideRendererProps> = ({
 
   const [showPearls, setShowPearls] = useState(false);
   const [showQuestions, setShowQuestions] = useState(false);
-  const [showSlideChat, setShowSlideChat] = useState(false);
+  const [showSlideChat, setShowSlideChat] = useState((slide.discussions && slide.discussions.length > 0) || false);
 
   // In-slide Q&A state
   const [slideQuestion, setSlideQuestion] = useState('');
   const [isAskingSlide, setIsAskingSlide] = useState(false);
-  const [slideAnswers, setSlideAnswers] = useState<Array<{ q: string; a: string; reasoning?: string }>>([]);
+  const [slideAnswers, setSlideAnswers] = useState<Array<{ q: string; a: string; reasoning?: string }>>(
+    slide.discussions || []
+  );
+
+  useEffect(() => {
+    if (slide.discussions && slide.discussions.length > 0) {
+      setSlideAnswers(slide.discussions);
+      setShowSlideChat(true);
+    }
+  }, [slide.discussions]);
   const [streamLiveAnswer, setStreamLiveAnswer] = useState('');
   const [streamLiveThinking, setStreamLiveThinking] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
@@ -535,7 +544,15 @@ export const EnhancedSlideRenderer: React.FC<EnhancedSlideRendererProps> = ({
         },
       });
 
-      setSlideAnswers((prev) => [...prev, { q, a: response.answer, reasoning: response.reasoning }]);
+      const newAnswerItem = { q, a: response.answer, reasoning: response.reasoning, timestamp: Date.now() };
+      const newAnswers = [...slideAnswers, newAnswerItem];
+      setSlideAnswers(newAnswers);
+      if (onUpdateSlide) {
+        onUpdateSlide({
+          ...slide,
+          discussions: newAnswers,
+        });
+      }
       setSlideQuestion('');
       setAttachedFiles([]);
       setAttachedPreviews([]);
