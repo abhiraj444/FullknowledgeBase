@@ -183,7 +183,8 @@ function simpleMarkdownToHtml(md: string): string {
     .replace(/_\{([^}]+)\}/g, '<sub>$1</sub>')
     .replace(/\^\{([^}]+)\}/g, '<sup>$1</sup>')
     .replace(/\$\$/g, '')
-    .replace(/\$/g, '');
+    .replace(/\$/g, '')
+    .replace(/\|\s*\|\s*(?=[a-zA-Z0-9_*~`])/g, '|\n| ');
 
   const lines = text.split('\n');
   const htmlLines: string[] = [];
@@ -236,19 +237,21 @@ function simpleMarkdownToHtml(md: string): string {
       continue;
     }
 
-    // Check for Markdown table line
-    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+    // Check for Markdown table line (contains '|')
+    if (trimmed.includes('|')) {
       if (inList) {
         htmlLines.push('</ul>');
         inList = false;
       }
-      // If separator line like |---|---|
-      if (/^\|(\s*:?-+:?\s*\|)+$/.test(trimmed)) {
+      // If separator line like |---|---| or ---|---
+      if (/^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(trimmed)) {
         continue; // Skip separator line
       }
       inTable = true;
-      const cells = trimmed
-        .slice(1, -1)
+      let cleanRow = trimmed;
+      if (cleanRow.startsWith('|')) cleanRow = cleanRow.slice(1);
+      if (cleanRow.endsWith('|')) cleanRow = cleanRow.slice(0, -1);
+      const cells = cleanRow
         .split('|')
         .map((c) => c.trim());
       tableRows.push(cells);

@@ -68,6 +68,110 @@ function extractReadableContent(raw: string): string {
 }
 
 /**
+ * Normalizes Markdown tables to strictly comply with GFM requirements:
+ * 1. Splits accidentally merged table rows (e.g., "... | | Next Row | ...").
+ * 2. Ensures leading and trailing pipes on all rows of a table block.
+ * 3. Validates delimiter rows (e.g., "|---|---|").
+ * 4. Ensures table blocks are isolated with blank lines (\n\n) before and after so remark-gfm parses them.
+ */
+function normalizeMarkdownTables(text: string): string {
+  if (!text || !text.includes('|')) return text;
+
+  // Step 1: Split merged table rows that were concatenated on a single line
+  // e.g., "... | | Col 1 | Col 2 |" -> "... |\n| Col 1 | Col 2 |"
+  let sanitized = text.replace(/\|\s*\|\s*(?=[a-zA-Z0-9_*~`])/g, '|\n| ');
+
+  // Step 2: Process line-by-line to identify and isolate table blocks
+  const lines = sanitized.split('\n');
+  const result: string[] = [];
+  let inTable = false;
+  let tableBuffer: string[] = [];
+
+  const isDelimiterLine = (line: string): boolean => {
+    const trimmed = line.trim();
+    return /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(trimmed);
+  };
+
+  const isTableRow = (line: string): boolean => {
+    const trimmed = line.trim();
+    if (!trimmed.includes('|')) return false;
+    // Must contain at least one pipe and not be a pure delimiter
+    return true;
+  };
+
+  const flushTableBuffer = () => {
+    if (tableBuffer.length === 0) return;
+
+    // Check if tableBuffer has at least 2 lines and contains a valid delimiter row (typically at index 1)
+    let delimiterIdx = -1;
+    for (let i = 0; i < tableBuffer.length; i++) {
+      if (isDelimiterLine(tableBuffer[i])) {
+        delimiterIdx = i;
+        break;
+      }
+    }
+
+    if (delimiterIdx >= 1) {
+      // Valid table found!
+      // Normalize all rows in this table: ensure leading '|' and trailing '|'
+      const normalizedTable = tableBuffer.map((row) => {
+        let r = row.trim();
+        if (!r.startsWith('|')) r = '| ' + r;
+        if (!r.endsWith('|')) r = r + ' |';
+        return r;
+      });
+
+      // Ensure empty line before table if previous line isn't empty
+      if (result.length > 0 && result[result.length - 1].trim() !== '') {
+        result.push('');
+      }
+
+      result.push(...normalizedTable);
+
+      // Add trailing empty line placeholder
+      result.push('');
+    } else {
+      // Not a recognized table structure, push original lines as is
+      result.push(...tableBuffer);
+    }
+
+    tableBuffer = [];
+    inTable = false;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      if (inTable) {
+        flushTableBuffer();
+      } else {
+        result.push(line);
+      }
+      continue;
+    }
+
+    // Check if line looks like part of a table (contains '|')
+    if (isTableRow(line)) {
+      inTable = true;
+      tableBuffer.push(line);
+    } else {
+      if (inTable) {
+        flushTableBuffer();
+      }
+      result.push(line);
+    }
+  }
+
+  if (inTable) {
+    flushTableBuffer();
+  }
+
+  return result.join('\n');
+}
+
+/**
  * Normalizes biomedical notation, LaTeX delimiters, tables, and indentation
  * so KaTeX, Tables, and Markdown elements render cleanly and accurately.
  */
@@ -114,8 +218,8 @@ function normalizeBiomedicalNotation(raw: string): string {
     return `$${math.trim()}$`;
   });
 
-  // 5. Ensure Markdown tables have an empty line before and after so remarkGfm parses them correctly
-  text = text.replace(/([^\n])\n(\|[\s\S]*?\|)\n([^\n])/g, '$1\n\n$2\n\n$3');
+  // 5. Robust Markdown table parsing normalization
+  text = normalizeMarkdownTables(text);
 
   // 6. Support common clinical/biomedical arrows and degree shorthand outside math
   text = text
@@ -212,28 +316,28 @@ export function ClinicalMarkdownRenderer({ content, className = '' }: ClinicalMa
             );
           },
           table: ({ children }) => (
-            <div className="overflow-x-auto my-3 rounded-xl border border-border bg-card shadow-2xs">
-              <table className="w-full text-xs text-left border-collapse min-w-full divide-y divide-border">
+            <div className="overflow-x-auto my-4 rounded-xl border border-border/80 bg-card shadow-xs">
+              <table className="w-full text-xs text-left border-collapse min-w-full">
                 {children}
               </table>
             </div>
           ),
           thead: ({ children }) => (
-            <thead className="bg-muted/70 text-foreground font-bold">{children}</thead>
+            <thead className="bg-muted/80 text-foreground font-bold border-b border-border">{children}</thead>
           ),
           tbody: ({ children }) => (
-            <tbody className="divide-y divide-border/50 bg-card">{children}</tbody>
+            <tbody className="divide-y divide-border/40 bg-card">{children}</tbody>
           ),
           tr: ({ children }) => (
-            <tr className="hover:bg-muted/30 transition-colors">{children}</tr>
+            <tr className="even:bg-muted/20 odd:bg-card hover:bg-primary/5 transition-colors">{children}</tr>
           ),
           th: ({ children }) => (
-            <th className="px-3.5 py-2.5 font-bold text-foreground text-xs uppercase tracking-wider border-b border-border">
+            <th className="px-3.5 py-2.5 font-bold text-foreground text-xs uppercase tracking-wider border-r border-border/40 last:border-r-0">
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td className="px-3.5 py-2 text-foreground/90 border-b border-border/40 text-xs align-top">
+            <td className="px-3.5 py-2.5 text-foreground/90 text-xs leading-relaxed align-top border-r border-border/30 last:border-r-0">
               {children}
             </td>
           ),
