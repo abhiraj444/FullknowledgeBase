@@ -27,6 +27,7 @@ import {
   Eye,
   FileText,
   Settings2,
+  Zap,
 } from 'lucide-react';
 import type { KnowledgeMapData, KnowledgeTreeNode } from '@/types';
 import { useToast } from '@/hooks/use-toast';
@@ -227,6 +228,11 @@ function simpleMarkdownToHtml(md: string): string {
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
 
+    // Ignore markdown code fences like ```markdown or ```
+    if (trimmed.startsWith('```')) {
+      continue;
+    }
+
     if (!trimmed) {
       if (inList) {
         htmlLines.push('</ul>');
@@ -238,14 +244,45 @@ function simpleMarkdownToHtml(md: string): string {
       continue;
     }
 
+    // Check for Horizontal Rules (---, ***, ___)
+    if (/^([-*_]){3,}$/.test(trimmed)) {
+      if (inList) {
+        htmlLines.push('</ul>');
+        inList = false;
+      }
+      if (inTable) {
+        flushTable();
+      }
+      htmlLines.push('<hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 8px 0;" />');
+      continue;
+    }
+
+    // Check for Blockquote / Key Take-away (starts with >)
+    if (trimmed.startsWith('>')) {
+      if (inList) {
+        htmlLines.push('</ul>');
+        inList = false;
+      }
+      if (inTable) {
+        flushTable();
+      }
+      const quoteText = trimmed.replace(/^>\s*/, '');
+      htmlLines.push(
+        `<div style="margin: 6px 0; padding: 6px 10px; background-color: #f0f9ff; border-left: 3px solid #0284c7; font-size: 8.5pt; color: #0369a1; border-radius: 0 4px 4px 0; line-height: 1.4;">
+          ${formatInline(quoteText)}
+        </div>`
+      );
+      continue;
+    }
+
     // Check for Markdown table line (contains '|')
     if (trimmed.includes('|')) {
       if (inList) {
         htmlLines.push('</ul>');
         inList = false;
       }
-      // If separator line like |---|---| or ---|---
-      if (/^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(trimmed)) {
+      // If separator line like |---|---| or ---|--- or |:---|:---|
+      if (/^\|?(\s*:?-{2,}:?\s*\|?)+$/.test(trimmed) || /^[\s-:|]+$/.test(trimmed)) {
         continue; // Skip separator line
       }
       inTable = true;
@@ -261,14 +298,15 @@ function simpleMarkdownToHtml(md: string): string {
       flushTable();
     }
 
-    if (trimmed.startsWith('### ')) {
+    if (trimmed.startsWith('### ') || trimmed.startsWith('#### ')) {
       if (inList) {
         htmlLines.push('</ul>');
         inList = false;
       }
+      const headingText = trimmed.replace(/^#{3,4}\s+/, '');
       htmlLines.push(
-        `<h4 style="margin: 8px 0 4px 0; font-size: 10pt; font-weight: 700; color: #1e293b;">${formatInline(
-          trimmed.slice(4)
+        `<h4 style="margin: 8px 0 4px 0; font-size: 9.5pt; font-weight: 700; color: #1e293b;">${formatInline(
+          headingText
         )}</h4>`
       );
       continue;
@@ -279,7 +317,7 @@ function simpleMarkdownToHtml(md: string): string {
         inList = false;
       }
       htmlLines.push(
-        `<h3 style="margin: 10px 0 4px 0; font-size: 11pt; font-weight: 700; color: #0f172a;">${formatInline(
+        `<h3 style="margin: 10px 0 4px 0; font-size: 10.5pt; font-weight: 700; color: #0f172a; border-bottom: 1px solid #f1f5f9; padding-bottom: 2px;">${formatInline(
           trimmed.slice(3)
         )}</h3>`
       );
@@ -291,7 +329,7 @@ function simpleMarkdownToHtml(md: string): string {
         inList = false;
       }
       htmlLines.push(
-        `<h2 style="margin: 12px 0 6px 0; font-size: 12pt; font-weight: 800; color: #0f172a;">${formatInline(
+        `<h2 style="margin: 12px 0 6px 0; font-size: 11.5pt; font-weight: 800; color: #0f172a;">${formatInline(
           trimmed.slice(2)
         )}</h2>`
       );
@@ -502,11 +540,13 @@ function renderPdfCard(params: PdfCardRenderParams): number {
 function cleanMarkdownForPdf(text: string): string {
   if (!text) return '';
   return text
+    .replace(/^```[a-zA-Z0-9_-]*\n?/gm, '')
+    .replace(/```$/gm, '')
     .replace(/\*\*(.*?)\*\*/g, '$1')
     .replace(/\*(.*?)\*/g, '$1')
     .replace(/__(.*?)__/g, '$1')
     .replace(/_(.*?)_/g, '$1')
-    .replace(/`(.*?)`/g, '$1')
+    .replace(/`+(.*?)`+/g, '$1')
     .replace(/\[(.*?)\]\(.*?\)/g, '$1')
     .replace(/\$\$(.*?)\$\$/gs, '$1')
     .replace(/\$(.*?)\$/g, '$1')
@@ -531,7 +571,8 @@ function cleanMarkdownForPdf(text: string): string {
 }
 
 interface MarkdownBlock {
-  type: 'paragraph' | 'bullet_list' | 'numbered_list' | 'table';
+  type: 'paragraph' | 'bullet_list' | 'numbered_list' | 'table' | 'heading' | 'blockquote' | 'divider';
+  level?: number;
   text?: string;
   items?: string[];
   headers?: string[];
@@ -579,7 +620,11 @@ function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
           .map((c) => c.trim());
 
       const headers = parseRow(tableLines[0]);
-      const dataRows = tableLines.slice(1).filter((l) => !/^\|?[\s-:]+\|?$/.test(l.trim()));
+      const dataRows = tableLines.slice(1).filter((l) => {
+        const trimmed = l.trim();
+        const isSep = /^\|?(\s*:?-{2,}:?\s*\|?)+$/.test(trimmed) || /^[\s-:|]+$/.test(trimmed);
+        return !isSep;
+      });
       const rows = dataRows.map(parseRow);
       if (headers.length > 0) {
         blocks.push({ type: 'table', headers, rows });
@@ -593,6 +638,52 @@ function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
   for (const rawLine of lines) {
     const line = rawLine.trim();
 
+    // Skip code fences like ```markdown or ```
+    if (line.startsWith('```')) {
+      continue;
+    }
+
+    // Horizontal Rule
+    if (/^([-*_]){3,}$/.test(line)) {
+      flushParagraph();
+      flushBullets();
+      flushNumbered();
+      flushTable();
+      blocks.push({ type: 'divider' });
+      continue;
+    }
+
+    // Blockquote / Key Take-away
+    if (line.startsWith('>')) {
+      flushParagraph();
+      flushBullets();
+      flushNumbered();
+      flushTable();
+      const quoteText = line.replace(/^>\s*/, '').trim();
+      if (quoteText) {
+        blocks.push({ type: 'blockquote', text: quoteText });
+      }
+      continue;
+    }
+
+    // Headings (#, ##, ###, ####)
+    if (line.startsWith('#')) {
+      const match = line.match(/^(#{1,6})\s+(.*)$/);
+      if (match) {
+        flushParagraph();
+        flushBullets();
+        flushNumbered();
+        flushTable();
+        blocks.push({
+          type: 'heading',
+          level: match[1].length,
+          text: match[2].trim(),
+        });
+        continue;
+      }
+    }
+
+    // Tables
     if (line.startsWith('|')) {
       flushParagraph();
       flushBullets();
@@ -704,7 +795,57 @@ function renderPdfRichCard(params: PdfRichCardRenderParams): number {
   }
 
   for (const block of blocks) {
-    if (block.type === 'paragraph' && block.text) {
+    if (block.type === 'heading' && block.text) {
+      const isMajor = (block.level || 2) <= 2;
+      const headFontSize = isMajor ? fontSize + 1.0 : fontSize + 0.4;
+      const headLineHeight = headFontSize * 0.48;
+
+      const cleanHead = cleanMarkdownForPdf(block.text);
+      const headLines = doc.splitTextToSize(cleanHead, innerWidth);
+      const headHeight = headLines.length * headLineHeight;
+
+      if (y + headHeight + 4 > bottomLimit) {
+        y = onPageBreak();
+      }
+
+      y += 1.5;
+      doc.setFont('NotoSans', 'bold');
+      doc.setFontSize(headFontSize);
+      doc.setTextColor(isMajor ? 15 : 30, isMajor ? 23 : 41, isMajor ? 42 : 59);
+      doc.text(headLines, textX, y + headLineHeight * 0.8);
+      y += headHeight + 2.0;
+    } else if (block.type === 'blockquote' && block.text) {
+      const cleanQuote = cleanMarkdownForPdf(block.text);
+      doc.setFont('NotoSans', 'italic');
+      doc.setFontSize(fontSize);
+      const quoteLines = doc.splitTextToSize(cleanQuote, innerWidth - 6);
+      const qHeight = quoteLines.length * lineHeight + 4;
+
+      if (y + qHeight + 2 > bottomLimit) {
+        y = onPageBreak();
+      }
+
+      // Draw callout box
+      doc.setFillColor(240, 249, 255);
+      doc.setDrawColor(186, 230, 253);
+      doc.roundedRect(textX, y, innerWidth, qHeight, 0.5, 0.5, 'FD');
+
+      // Draw left accent bar
+      doc.setFillColor(2, 132, 199);
+      doc.rect(textX, y, 1.2, qHeight, 'F');
+
+      doc.setFont('NotoSans', 'italic');
+      doc.setTextColor(3, 105, 161);
+      doc.text(quoteLines, textX + 3.5, y + lineHeight * 0.8 + 2);
+      y += qHeight + 2.5;
+    } else if (block.type === 'divider') {
+      if (y + 4 > bottomLimit) {
+        y = onPageBreak();
+      }
+      doc.setDrawColor(226, 232, 240);
+      doc.line(textX, y + 1, textX + innerWidth, y + 1);
+      y += 3.0;
+    } else if (block.type === 'paragraph' && block.text) {
       doc.setFont('NotoSans', isItalic ? 'italic' : 'normal');
       doc.setFontSize(fontSize);
       doc.setTextColor(textColor[0], textColor[1], textColor[2]);
@@ -818,6 +959,7 @@ export function KnowledgePdfExportModal({
 
   // Export Configurations
   const [includeSummary, setIncludeSummary] = useState(true);
+  const [includeConcise, setIncludeConcise] = useState(true);
   const [includeExplanations, setIncludeExplanations] = useState(true);
   const [includeFirstPrinciples, setIncludeFirstPrinciples] = useState(true);
   const [includeUserNotes, setIncludeUserNotes] = useState(true);
@@ -1047,14 +1189,35 @@ export function KnowledgePdfExportModal({
           });
         }
 
-        // Standard or Concise Explanation (Clinical Pathway)
-        const activeStdText = node.explanation?.standard || node.explanation?.concise;
-        if (includeExplanations && activeStdText) {
-          const isConciseOnly = !node.explanation?.standard && Boolean(node.explanation?.concise);
+        // 1. High-Yield Overview (Concise Summary)
+        if (includeConcise && node.explanation?.concise) {
           currentY = renderPdfRichCard({
             doc,
-            title: isConciseOnly ? 'High-Yield Overview (Concise Summary):' : 'Clinical Pathway & Explanation:',
-            markdown: activeStdText,
+            title: '⚡ High-Yield Overview (Concise Summary):',
+            markdown: node.explanation.concise,
+            margin,
+            indent,
+            contentWidth,
+            bottomLimit,
+            fillColor: [240, 249, 255], // Sky Blue tint
+            borderColor: [186, 230, 253],
+            titleColor: [3, 105, 161],
+            textColor: [12, 74, 110],
+            fontSize: 7.8,
+            currentY,
+            onPageBreak: () => {
+              checkPageBreak(999);
+              return currentY;
+            },
+          });
+        }
+
+        // 2. Standard or Detailed Clinical Explanation
+        if (includeExplanations && node.explanation?.standard) {
+          currentY = renderPdfRichCard({
+            doc,
+            title: '📖 Clinical Pathway & Detailed Workup:',
+            markdown: node.explanation.standard,
             margin,
             indent,
             contentWidth,
@@ -1297,15 +1460,22 @@ export function KnowledgePdfExportModal({
             }
 
             ${
-              includeExplanations && hasExplanation && stdOrConciseText
+              includeConcise && node.explanation?.concise
+                ? `
+              <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 4px; padding: 8px 10px; margin: 6px 0;">
+                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #0369a1; margin-bottom: 4px;">⚡ High-Yield Overview (Concise Summary):</div>
+                <div style="color: #0c4a6e;">${simpleMarkdownToHtml(node.explanation.concise)}</div>
+              </div>
+            `
+                : ''
+            }
+
+            ${
+              includeExplanations && node.explanation?.standard
                 ? `
               <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px 10px; margin: 6px 0;">
-                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #475569; margin-bottom: 4px;">📖 ${
-                  !node.explanation?.standard && node.explanation?.concise
-                    ? 'High-Yield Overview (Concise Summary):'
-                    : 'Standard Explanation &amp; Clinical Pathway:'
-                }</div>
-                ${simpleMarkdownToHtml(stdOrConciseText)}
+                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #475569; margin-bottom: 4px;">📖 Clinical Pathway &amp; Detailed Workup:</div>
+                <div style="color: #334155;">${simpleMarkdownToHtml(node.explanation.standard)}</div>
               </div>
             `
                 : ''
@@ -1500,6 +1670,7 @@ export function KnowledgePdfExportModal({
     targetTree,
     totalExportNodes,
     includeSummary,
+    includeConcise,
     includeExplanations,
     includeFirstPrinciples,
     includeUserNotes,
@@ -1647,22 +1818,22 @@ export function KnowledgePdfExportModal({
                   <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-card/60">
                     <div className="space-y-0.5">
                       <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                        <BookOpen className="h-3.5 w-3.5 text-primary" /> Document Summary
+                        <Zap className="h-3.5 w-3.5 text-sky-600" /> Concise Summaries
                       </span>
                       <p className="text-[10px] text-muted-foreground">
-                        Include top synthesis &amp; domain overview
+                        Include high-yield 50–100 word overviews
                       </p>
                     </div>
-                    <Switch checked={includeSummary} onCheckedChange={setIncludeSummary} />
+                    <Switch checked={includeConcise} onCheckedChange={setIncludeConcise} />
                   </div>
 
                   <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-card/60">
                     <div className="space-y-0.5">
                       <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                        <FileText className="h-3.5 w-3.5 text-emerald-600" /> Standard Explanations
+                        <FileText className="h-3.5 w-3.5 text-emerald-600" /> Detailed Clinical Workups
                       </span>
                       <p className="text-[10px] text-muted-foreground">
-                        Include detailed mechanisms &amp; pathways
+                        Include deep mechanisms, pathways &amp; tables
                       </p>
                     </div>
                     <Switch checked={includeExplanations} onCheckedChange={setIncludeExplanations} />
@@ -1693,6 +1864,18 @@ export function KnowledgePdfExportModal({
                       </p>
                     </div>
                     <Switch checked={includeUserNotes} onCheckedChange={setIncludeUserNotes} />
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-card/60 sm:col-span-2">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <BookOpen className="h-3.5 w-3.5 text-primary" /> Top-Level Document Summary
+                      </span>
+                      <p className="text-[10px] text-muted-foreground">
+                        Include high-yield clinical synthesis &amp; domain overview
+                      </p>
+                    </div>
+                    <Switch checked={includeSummary} onCheckedChange={setIncludeSummary} />
                   </div>
                 </div>
               </div>
