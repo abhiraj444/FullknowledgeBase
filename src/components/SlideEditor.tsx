@@ -399,8 +399,8 @@ export function SlideEditor({
     const slideNums = selectedIndices.map((i) => `#${i + 1}`).join(', ');
     setStreamStep(
       action === 'expand_selected'
-        ? `Expanding depth for slide(s) ${slideNums} with clinical comparison tables, pathophysiological mechanisms, and board pearls...`
-        : `Refreshing content for slide(s) ${slideNums} with structured clinical items and updated pearls...`
+        ? `Expanding depth for slide(s) ${slideNums} with comparison tables, core mechanisms, and key takeaways...`
+        : `Refreshing content for slide(s) ${slideNums} with structured items and updated pearls...`
     );
     const indicesSet = new Set(selectedIndices);
     setLoadingSlides(indicesSet);
@@ -456,7 +456,7 @@ export function SlideEditor({
     const slideTitle = slides[slideIndex]?.title || `#${slideIndex + 1}`;
     setStreamStep(
       action === 'expand_selected'
-        ? `Expanding clinical depth for slide #${slideIndex + 1} (${slideTitle})...`
+        ? `Expanding depth for slide #${slideIndex + 1} (${slideTitle})...`
         : `Refreshing structured content for slide #${slideIndex + 1} (${slideTitle})...`
     );
     setLoadingSlides(new Set([slideIndex]));
@@ -1566,7 +1566,7 @@ export function SlideEditor({
                                   onClick={() => handleModifySingleSlide(index, 'expand_selected')}
                                   disabled={isModifying}
                                   className="h-7 px-2.5 text-xs font-semibold gap-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/40 shadow-2xs"
-                                  title="Expand depth and clinical detail for this slide"
+                                  title="Expand depth and comprehensive detail for this slide"
                                 >
                                   <Scaling className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                                   <span>Expand</span>
@@ -1612,7 +1612,7 @@ export function SlideEditor({
       <AlertDialog open={isAddSectionModalOpen} onOpenChange={setIsAddSectionModalOpen}>
         <AlertDialogContent className="max-w-md sm:max-w-lg max-h-[85vh] flex flex-col">
           <AlertDialogHeader>
-            <AlertDialogTitle>Add New Clinical Section</AlertDialogTitle>
+            <AlertDialogTitle>Add New Section / Topic</AlertDialogTitle>
             <AlertDialogDescription>
               Select suggested high-yield topics or enter your own to append to this presentation deck.
             </AlertDialogDescription>
@@ -1629,7 +1629,7 @@ export function SlideEditor({
                 {newTopicSuggestions.length > 0 && (
                   <div className="space-y-2">
                     <Label className="text-xs font-semibold uppercase text-muted-foreground">
-                      Suggested Medical Topics
+                      Suggested Topics
                     </Label>
                     <div className="grid grid-cols-1 gap-2">
                       {newTopicSuggestions.map((t, idx) => {

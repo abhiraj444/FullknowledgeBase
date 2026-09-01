@@ -958,21 +958,21 @@ export function getLanguageDirective(language: TargetLanguage = 'english'): stri
 export function getAudienceDirective(audienceMode: AudienceMode = 'doctor'): string {
     if (audienceMode === 'simplified') {
         return `
-**TARGET AUDIENCE & TONE: SIMPLIFIED / FIRST-PRINCIPLES ENTHUSIAST (PATIENT & CURIOUS LEARNER)**
-- **Core Educational Mission**: Explain this clinical diagnosis or medical topic from **FIRST PRINCIPLES** (fundamental physics, mechanics, plumbing, electricity, chemistry, and biology) so that any patient, high school or college student, or curious explorer can intuitively understand what is happening inside the human body.
-- **Intuitive Real-World Analogies**: Use vivid, memorable metaphors (e.g., the heart as a high-pressure dual-chamber pump, blood vessels as elastic highways, the immune system as specialized security patrols, the kidneys as microscopic coffee filters, neurons as insulated fiber-optic wires).
-- **Spark Curiosity & Self-Research**: Formulate explanations to spark genuine curiosity and excitement about human biology! Highlight fascinating "Did you know?" bio-mechanics insights that inspire the user to research the topic further on their own.
-- **Accessible yet Scientifically Accurate**: Avoid overwhelming jargon. When introducing a real medical term (e.g., "Systolic Hypertension" or "Atherosclerosis"), immediately explain the root meaning simply in parentheses.
-- **Empowering Next Steps**: Provide clear, reassuring, practical takeaways on what warning signs mean, how medications help restore balance in the body, and what smart questions to ask a doctor.
+**TARGET AUDIENCE & TONE: SIMPLIFIED / FIRST-PRINCIPLES ENTHUSIAST (CURIOUS LEARNER & FOUNDATIONAL)**
+- **Core Educational Mission**: Explain the topic from **FIRST PRINCIPLES** (fundamental mechanics, physics, logic, chemistry, biology, history, or foundational structural rules) so that any student, curious explorer, or reader can intuitively understand what is happening.
+- **Intuitive Real-World Analogies**: Use vivid, memorable metaphors and clear cause-and-effect breakdowns tailored directly to the specific subject domain (e.g., if medical, biology/physiology; if engineering, mechanics/code; if history/social sciences, societal/strategic dynamics).
+- **Spark Curiosity & Self-Research**: Formulate explanations to spark genuine curiosity and excitement! Highlight fascinating "Did you know?" insights that inspire the user to research the topic further on their own.
+- **Accessible yet Accurate**: Avoid overwhelming jargon. When introducing a specialized technical or domain term, immediately explain the root meaning simply in parentheses.
+- **Empowering Key Takeaways**: Provide clear, practical takeaways and high-yield insights that make the topic stick.
 `;
     }
 
     return `
-**TARGET AUDIENCE & TONE: CLINICAL / DOCTOR (MBBS, PG RESIDENTS & CLINICIANS - TECHNICAL)**
-- **Core Clinical Mission**: Deliver rigorous, postgraduate-level evidence-based medicine and academic clinical precision.
-- **Deep Pathophysiology**: Detail cellular/molecular pathophysiology, hemodynamic alterations, receptor kinetics, and biochemical cascades.
-- **Guideline Citations**: Reference established clinical guidelines (ACC/AHA, ESC, KDIGO, GOLD, Surviving Sepsis, IDSA, ADA, NICE).
-- **High-Yield Specifics**: Emphasize pre-test and post-test probabilities, likelihood ratios, "can't-miss" emergent life threats, pharmacotherapeutic drug classes, dosage contraindications, and high-yield board/viva pearls.
+**TARGET AUDIENCE & TONE: PROFESSIONAL / EXPERT (RIGOROUS & IN-DEPTH)**
+- **Core Mission**: Deliver rigorous, comprehensive, postgraduate-level subject matter expertise and analytical depth.
+- **Deep Mechanisms & Analysis**: Detail foundational theories, mechanisms, quantitative/qualitative frameworks, and critical nuances of the domain.
+- **Guideline & Domain Citations**: Reference established academic guidelines, empirical standards, authoritative literature, or primary historical/scientific sources.
+- **High-Yield Specifics**: Emphasize exact definitions, key comparative criteria, edge cases, formulas/rules, and authoritative takeaways.
 `;
 }
 
@@ -1884,12 +1884,12 @@ For EACH topic in the list above, output one complete slide using this structure
 - **Core Concept 1**: Detailed explanation of first principle / mechanism.
 - **Core Concept 2**: Detailed explanation of second principle / mechanism.
 
-| Feature / Metric | Expected Value / Comparison | Clinical / Practical Significance |
+| Feature / Parameter / Dimension | Value / Characteristic / Comparison | Significance / Practical Impact |
 | --- | --- | --- |
-| Row 1 Feature | Observation / Value | Clinical Interpretation |
-| Row 2 Feature | Observation / Value | Clinical Interpretation |
+| Row 1 Feature | Observation / Value | Impact / Interpretation |
+| Row 2 Feature | Observation / Value | Impact / Interpretation |
 
-> Note: High-yield clinical warning, guideline citation, or theoretical caveat.
+> Note: Key guideline citation, theoretical caveat, historical context, or critical warning.
 
 ### Pearls
 - ${audienceMode === 'simplified' ? 'Fascinating first-principle insight or "Did You Know?" fact' : 'High-yield exam pearl, clinical guideline takeaway, or formula'}
@@ -2167,11 +2167,11 @@ Generate content for a single presentation slide on the topic: **${topic}** in s
 - **Concept 1**: Detailed explanation...
 - **Concept 2**: Detailed explanation...
 
-| Parameter / Feature | Value / Comparison | Significance |
+| Parameter / Feature | Value / Comparison | Significance / Impact |
 | --- | --- | --- |
-| Row 1 | Observation | Clinical Interpretation |
+| Row 1 Feature | Observation / Value | Practical / Analytical Interpretation |
 
-> Note: Crucial clinical or theoretical note.
+> Note: Key guideline citation, theoretical caveat, or critical domain takeaway.
 
 ### Pearls
 - ${audienceMode === 'simplified' ? 'Fascinating first-principle insight' : 'High-yield exam pearl or clinical guideline takeaway'}
@@ -2366,55 +2366,79 @@ Generate content for a single presentation slide on the topic: **${topic}** in s
         const isExpand = input.action === 'expand_selected';
 
         const prompt = `
-You are a Distinguished Medical Professor and Curriculum Director modifying specific medical presentation slides.
+You are a Premier Professor, Educator, and Subject Matter Expert modifying and expanding specific presentation slides.
 
 ${getLanguageDirective(language)}
 
 ${getAudienceDirective(audienceMode)}
 
-**Action to perform on target slides:** ${isExpand ? 'EXPAND DEPTH & CLINICAL DETAIL' : 'RE-SYNTHESIZE & REFRESH CONTENT'}
+**Adaptive Domain & Subject Matter Guidance:**
+- If the presentation topic or slide is medical, provide authoritative clinical, pathophysiological, diagnostic, and pharmacological depth.
+- If non-medical (engineering, history, politics, philosophy, literature, economics, physics, mathematics, UPSC/civil services, general knowledge), shift your mindset completely to that field's Subject Matter Expert (SME). Deliver deep, authentic domain concepts, historical context, technical principles, empirical data, or architectural mechanisms without imposing artificial medical jargon.
+
+**Action to perform on target slides:** ${isExpand ? 'EXPAND DEPTH & COMPREHENSIVE DETAIL' : 'RE-SYNTHESIZE & REFRESH CONTENT'}
 
 **Target Slides to Modify (${targetSlides.length} slide${targetSlides.length > 1 ? 's' : ''}):**
-${JSON.stringify(
-    targetSlides.map((t) => ({
-        originalIndex: t.originalIndex,
-        title: t.slide.title,
-        currentContent: t.slide.content,
-        currentSummary: t.slide.summary,
-    }))
-)}
+${targetSlides
+    .map(
+        (t) => `### Slide #${t.originalIndex + 1}: ${t.slide.title}
+Current Summary: ${t.slide.summary || 'N/A'}
+Current Content Preview:
+${t.slide.content
+    .map((c) => {
+        if (c.type === 'bullet_list') return c.items.map((it) => `- ${it.text}`).join('\n');
+        if (c.type === 'numbered_list') return c.items.map((it, idx) => `${idx + 1}. ${it.text}`).join('\n');
+        if (c.type === 'paragraph') return c.text;
+        if (c.type === 'note') return `> Note: ${c.text}`;
+        if (c.type === 'table') return `Table: ${c.headers.join(' | ')}`;
+        return '';
+    })
+    .filter(Boolean)
+    .join('\n')}
+`
+    )
+    .join('\n\n')}
 
 **Core Instructions:**
 1. ${
     isExpand
-        ? `EXPAND the clinical depth of each target slide significantly. Add:
-           - In-depth cellular/hemodynamic pathophysiology, clinical staging criteria, or drug dosing/contraindications.
-           - At least ONE dedicated clinical comparison/diagnostic criteria TABLE with clear column headers (e.g. Parameter vs Value vs Clinical Action, Drug vs Mechanism vs Dosing) with real medical values.
-           - 2-3 new high-yield clinical pearls and 2-3 proactive Viva/Board questions.
+        ? `EXPAND the analytical depth, precision, and substance of each target slide significantly. Add:
+           - In-depth first-principle mechanisms, foundational theories, structural breakdowns, and rigorous subject-matter depth.
+           - At least ONE dedicated structured comparison / analytical criteria TABLE tailored to the subject (e.g., Feature/Parameter vs Value/Description vs Practical Significance/Impact) with matching column counts across all rows.
+           - 2-3 new high-yield pearls / takeaways and 2-3 proactive deep-dive / viva questions.
            - An updated 1-2 sentence executive summary.`
-        : `RE-SYNTHESIZE each target slide with a fresh clinical perspective, structured bullet points, clear medical tables, updated summary, and new pearls.`
+        : `RE-SYNTHESIZE each target slide with a fresh subject-matter perspective, structured bullet points, clear analytical tables, updated summary, and new pearls.`
 }
-2. For ${
-    audienceMode === 'simplified'
-        ? 'Simplified mode: Use intuitive real-world mechanical/biological analogies and clear cause-and-effect breakdowns.'
-        : 'Doctor mode: Provide rigorous postgraduate-level evidence-based precision and guideline citations (ACC/AHA, ESC, KDIGO, GOLD).'
-}
-3. In tables, EVERY row's "cells" array length MUST EXACTLY EQUAL the "headers" array length.
-4. Output MUST be a valid JSON array containing exactly ${targetSlides.length} modified slide object(s), with "originalIndex" matching each target slide:
+2. Ensure high readability, bolding for key terms, and scannable clarity.
+3. Output in ${language.toUpperCase()}.
 
-[
-  {
-    "originalIndex": ${targetSlides[0].originalIndex},
-    "title": "${targetSlides[0].slide.title}",
-    "content": [
-      {"type": "bullet_list", "items": [{"text": "...", "bold": ["..."]}]},
-      {"type": "table", "headers": ["Clinical Metric", "Reference", "Pathological Significance"], "rows": [{"cells": ["Metric A", "Normal", "Indicates X"]}]}
-    ],
-    "summary": "Updated high-yield summary.",
-    "clinicalPearls": ["Pearl 1", "Pearl 2"],
-    "proactiveQuestions": ["Question 1", "Question 2"]
-  }
-]
+**Output Instructions (Structured Markdown):**
+Output each modified slide in structured Markdown format, separated by "---".
+For EACH of the ${targetSlides.length} target slide(s) above, output one complete slide using this structure (preserve the exact slide title):
+
+# Slide: <Exact Slide Title>
+**Summary:** <Updated 1-2 sentence core message / high-yield takeaway>
+
+### Key Concepts & Mechanisms
+- **Core Concept 1**: In-depth explanation of first principle / mechanism / analytical insight.
+- **Core Concept 2**: In-depth explanation of second principle / mechanism / analytical insight.
+
+| Feature / Metric / Parameter | Value / Characteristic / Comparison | Significance / Practical Impact |
+| --- | --- | --- |
+| Row 1 Feature | Observation / Value | Impact / Interpretation |
+| Row 2 Feature | Observation / Value | Impact / Interpretation |
+
+> Note: Key guideline citation, theoretical caveat, historical context, or critical warning.
+
+### Pearls
+- ${audienceMode === 'simplified' ? 'Fascinating first-principle insight or "Did You Know?" fact' : 'High-yield key takeaway, formula, or authoritative standard'}
+- ${audienceMode === 'simplified' ? 'Intuitive analogy or memory hook' : 'Nuanced domain insight or edge-case consideration'}
+
+### Proactive Questions
+- Thought-provoking deep dive question 1?
+- Thought-provoking deep dive question 2?
+
+---
 `;
 
         const text = await this._runPrompt(
@@ -2426,21 +2450,33 @@ ${JSON.stringify(
         );
 
         type ModifiedSlideItem = Slide & { originalIndex?: number };
-        let parsedModified = parseAiJson<ModifiedSlideItem[]>(text, []);
+        let parsedModified: ModifiedSlideItem[] = [];
 
-        // Fallback: If returned object wasn't unwrapped into an array or was empty
-        if (!Array.isArray(parsedModified) || parsedModified.length === 0) {
-            const progressiveSlides = extractProgressiveSlides(text);
-            if (progressiveSlides.length > 0) {
-                parsedModified = progressiveSlides.map((s, idx) => ({
+        // 1. Try progressive Structured Markdown parser first
+        const progressiveSlides = extractProgressiveSlides(text);
+        if (progressiveSlides && progressiveSlides.length > 0) {
+            parsedModified = progressiveSlides.map((s, idx) => {
+                // Try to find matching target slide by title
+                const matchingTarget = targetSlides.find(
+                    (t) => t.slide.title.toLowerCase().trim() === s.title.toLowerCase().trim()
+                );
+                return {
                     ...s,
-                    originalIndex: targetSlides[idx]?.originalIndex ?? input.selectedIndices[idx],
-                }));
+                    originalIndex: matchingTarget?.originalIndex ?? targetSlides[idx]?.originalIndex ?? input.selectedIndices[idx],
+                };
+            });
+        }
+
+        // 2. Fallback to JSON parser if Markdown parser found no slides
+        if (parsedModified.length === 0) {
+            const parsedJson = parseAiJson<ModifiedSlideItem[]>(text, []);
+            if (Array.isArray(parsedJson) && parsedJson.length > 0) {
+                parsedModified = parsedJson;
             }
         }
 
         if (!Array.isArray(parsedModified) || parsedModified.length === 0) {
-            console.warn('Failed to parse modified slides JSON, keeping original slides.');
+            console.warn('Failed to parse modified slides, keeping original slides.');
             return input.slides;
         }
 
