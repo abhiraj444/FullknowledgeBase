@@ -1047,12 +1047,14 @@ export function KnowledgePdfExportModal({
           });
         }
 
-        // Standard Explanation (Clinical Pathway)
-        if (includeExplanations && node.explanation?.standard) {
+        // Standard or Concise Explanation (Clinical Pathway)
+        const activeStdText = node.explanation?.standard || node.explanation?.concise;
+        if (includeExplanations && activeStdText) {
+          const isConciseOnly = !node.explanation?.standard && Boolean(node.explanation?.concise);
           currentY = renderPdfRichCard({
             doc,
-            title: 'Clinical Pathway & Explanation:',
-            markdown: node.explanation.standard,
+            title: isConciseOnly ? 'High-Yield Overview (Concise Summary):' : 'Clinical Pathway & Explanation:',
+            markdown: activeStdText,
             margin,
             indent,
             contentWidth,
@@ -1207,7 +1209,8 @@ export function KnowledgePdfExportModal({
    */
   const printableHtml = useMemo(() => {
     const renderNodeHtml = (node: KnowledgeTreeNode, numStr: string): string => {
-      const hasExplanation = Boolean(node.explanation?.standard);
+      const stdOrConciseText = node.explanation?.standard || node.explanation?.concise;
+      const hasExplanation = Boolean(stdOrConciseText);
       const hasFirstPrinciples = Boolean(node.explanation?.firstPrinciples);
       const hasUserNotes = Boolean(node.explanation?.userNotes);
 
@@ -1294,11 +1297,15 @@ export function KnowledgePdfExportModal({
             }
 
             ${
-              includeExplanations && hasExplanation
+              includeExplanations && hasExplanation && stdOrConciseText
                 ? `
               <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px 10px; margin: 6px 0;">
-                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #475569; margin-bottom: 4px;">📖 Standard Explanation &amp; Clinical Pathway:</div>
-                ${simpleMarkdownToHtml(node.explanation!.standard!)}
+                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #475569; margin-bottom: 4px;">📖 ${
+                  !node.explanation?.standard && node.explanation?.concise
+                    ? 'High-Yield Overview (Concise Summary):'
+                    : 'Standard Explanation &amp; Clinical Pathway:'
+                }</div>
+                ${simpleMarkdownToHtml(stdOrConciseText)}
               </div>
             `
                 : ''

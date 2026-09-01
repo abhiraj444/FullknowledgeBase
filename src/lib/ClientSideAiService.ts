@@ -2628,6 +2628,7 @@ Produce ONLY the Markdown bullet list or "NO_FURTHER_SUBTOPICS".`;
     /**
      * Surgical Token-Efficient Node Explanation:
      * Explains a specific subtopic using Standard, First-Principles, or Simplified Analogy lens.
+     * Supports both concise (50-100 words) and full comprehensive workups.
      * Uses ONLY Document Summary + Lineage Path (Parent + Node + Siblings).
      */
     async explainKnowledgeNode(
@@ -2639,6 +2640,7 @@ Produce ONLY the Markdown bullet list or "NO_FURTHER_SUBTOPICS".`;
             rootTitle?: string;
             siblingTitles?: string[];
             mode: 'standard' | 'first_principles' | 'simplified';
+            detailLevel?: 'concise' | 'full';
             language?: TargetLanguage;
             audienceMode?: AudienceMode;
             onStreamChunk?: (payload: StreamChunkCallbackPayload) => void;
@@ -2648,7 +2650,15 @@ Produce ONLY the Markdown bullet list or "NO_FURTHER_SUBTOPICS".`;
         const language = input.language || 'en';
 
         let modeInstructions = '';
-        if (input.mode === 'first_principles') {
+        if (input.detailLevel === 'concise' && input.mode === 'standard') {
+            modeInstructions = `**Lens: High-Yield Concise Overview (Strictly 50 to 100 Words)**
+- Provide a punchy, crystal-clear conceptual synthesis in strictly 50 to 100 words.
+- Structure briefly with:
+  - **Core Concept & Definition**: What is it in one clear sentence?
+  - **Essential Mechanism / Key Action**: How does it work concisely?
+  - **High-Yield Takeaway / Rule**: The single most critical exam/clinical pearl.
+- Keep it direct, crisp, and high-impact without filler phrases or conversational meta-commentary.`;
+        } else if (input.mode === 'first_principles') {
             modeInstructions = `**Lens: First-Principles Derivation (Ground-Up Truths)**
 - Deconstruct this concept down to its absolute fundamental truths (physics, biochemistry, physiology, or foundational mathematical/logical rules).
 - Explain *why* it must be this way from the ground up, eliminating rote memorization.

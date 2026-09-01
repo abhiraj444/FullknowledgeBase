@@ -170,6 +170,7 @@ export interface ContentCase extends BaseCase {
 }
 
 export interface KnowledgeNodeExplanation {
+    concise?: string;
     standard?: string;
     firstPrinciples?: string;
     simplified?: string;

@@ -29,7 +29,7 @@ interface KnowledgeNodeCardProps {
   onSelect: (node: KnowledgeTreeNode) => void;
   onToggleExpand: (nodeId: string) => void;
   onDissect: (node: KnowledgeTreeNode) => void;
-  onExplain: (node: KnowledgeTreeNode, mode: 'standard' | 'first_principles' | 'simplified') => void;
+  onExplain: (node: KnowledgeTreeNode, mode: 'standard' | 'first_principles' | 'simplified', detailLevel?: 'concise' | 'full') => void;
   onAddNote: (node: KnowledgeTreeNode) => void;
   isDissecting?: boolean;
   isExplaining?: boolean;
@@ -50,11 +50,12 @@ export function KnowledgeNodeCard({
   const hasChildren = Boolean(node.children && node.children.length > 0);
   const isExpanded = node.isExpanded ?? true;
 
+  const hasConcise = Boolean(node.explanation?.concise);
   const hasStandard = Boolean(node.explanation?.standard);
   const hasFirstPrinciples = Boolean(node.explanation?.firstPrinciples);
   const hasSimplified = Boolean(node.explanation?.simplified);
   const hasNotes = Boolean(node.explanation?.userNotes);
-  const hasAnyExplanation = hasStandard || hasFirstPrinciples || hasSimplified;
+  const hasAnyExplanation = hasConcise || hasStandard || hasFirstPrinciples || hasSimplified;
 
   // Depth-specific styling
   const depthColors = [
@@ -163,14 +164,19 @@ export function KnowledgeNodeCard({
               )}
 
               {/* Status Chips */}
-              {hasFirstPrinciples && (
-                <span className="stamp-badge text-[8px] py-0 px-1 border-amber-500/40 text-amber-600 bg-amber-500/5">
-                  🔬 1st Principles
+              {hasConcise && !hasStandard && (
+                <span className="stamp-badge text-[8px] py-0 px-1 border-sky-500/40 text-sky-600 dark:text-sky-400 bg-sky-500/5">
+                  ⚡ 50-100w
                 </span>
               )}
               {hasStandard && (
                 <span className="stamp-badge text-[8px] py-0 px-1 border-emerald-500/40 text-emerald-600 bg-emerald-500/5">
                   📖 Explored
+                </span>
+              )}
+              {hasFirstPrinciples && (
+                <span className="stamp-badge text-[8px] py-0 px-1 border-amber-500/40 text-amber-600 bg-amber-500/5">
+                  🔬 1st Principles
                 </span>
               )}
               {hasNotes && (
@@ -239,7 +245,7 @@ export function KnowledgeNodeCard({
               e.stopPropagation();
               onSelect(node);
               if (!hasAnyExplanation) {
-                onExplain(node, 'standard');
+                onExplain(node, 'standard', 'concise');
               }
             }}
             disabled={isExplaining}

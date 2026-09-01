@@ -38,7 +38,7 @@ interface KnowledgeStudyStageProps {
   documentSummary?: string;
   onClose?: () => void;
   onDissect: (node: KnowledgeTreeNode) => void;
-  onExplain: (node: KnowledgeTreeNode, mode: 'standard' | 'first_principles' | 'simplified') => void;
+  onExplain: (node: KnowledgeTreeNode, mode: 'standard' | 'first_principles' | 'simplified', detailLevel?: 'concise' | 'full') => void;
   onUpdateNotes: (nodeId: string, notes: string) => void;
   onStop?: () => void;
   isExplaining?: boolean;
@@ -88,6 +88,7 @@ export function KnowledgeStudyStage({
     );
   }
 
+  const conciseExplanation = node.explanation?.concise || '';
   const standardExplanation = node.explanation?.standard || '';
   const firstPrinciplesExplanation = node.explanation?.firstPrinciples || '';
   const simplifiedExplanation = node.explanation?.simplified || '';
@@ -95,7 +96,7 @@ export function KnowledgeStudyStage({
 
   const activeContent =
     activeTab === 'standard'
-      ? standardExplanation
+      ? (standardExplanation ? `${conciseExplanation ? `${conciseExplanation}\n\n---\n\n` : ''}${standardExplanation}` : conciseExplanation)
       : activeTab === 'first_principles'
       ? firstPrinciplesExplanation
       : activeTab === 'simplified'
@@ -306,48 +307,130 @@ export function KnowledgeStudyStage({
           />
         )}
 
-        {/* Tab 1: Standard Explanation */}
+        {/* Tab 1: Standard Explanation (Concise 50-100w Overview + On-Demand Full Workup) */}
         {activeTab === 'standard' && (
           <div className="space-y-4">
-            {standardExplanation ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs text-muted-foreground pb-2 border-b">
-                  <span className="font-semibold text-foreground flex items-center gap-1.5">
-                    <BookOpen className="h-3.5 w-3.5 text-primary" /> Rigorous Clinical / Academic Workup
-                  </span>
+            {/* If Concise Explanation is present */}
+            {conciseExplanation && (
+              <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 dark:bg-sky-950/20 p-4 space-y-2.5">
+                <div className="flex items-center justify-between gap-2 pb-2 border-b border-sky-500/20">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs sm:text-sm text-sky-800 dark:text-sky-300 flex items-center gap-1.5">
+                      <Zap className="h-4 w-4 text-sky-500 fill-sky-500/20" /> Concise Overview
+                    </span>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-sky-500/40 text-sky-700 dark:text-sky-300 bg-sky-500/10">
+                      {conciseExplanation.split(/\s+/).filter(Boolean).length} words
+                    </Badge>
+                  </div>
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => onExplain(node, 'standard')}
+                    onClick={() => onExplain(node, 'standard', 'concise')}
                     disabled={isExplaining}
-                    className="h-6 text-[11px] gap-1 text-muted-foreground hover:text-primary"
+                    className="h-6 text-[11px] gap-1 text-sky-700 dark:text-sky-300 hover:bg-sky-500/15"
+                    title="Re-generate concise summary"
                   >
                     <RefreshCw className="h-3 w-3" /> Re-generate
                   </Button>
                 </div>
+                <ClinicalMarkdownRenderer content={conciseExplanation} />
+              </div>
+            )}
+
+            {/* If Full Standard Explanation is NOT yet generated, show the prominent "Generate Full Explanation" banner */}
+            {conciseExplanation && !standardExplanation && (
+              <div className="rounded-xl border border-primary/25 bg-card p-4 sm:p-5 text-center sm:text-left flex flex-col sm:flex-row items-center justify-between gap-4 shadow-2xs">
+                <div className="space-y-1">
+                  <h4 className="text-xs sm:text-sm font-bold text-foreground flex items-center justify-center sm:justify-start gap-1.5">
+                    <BookOpen className="h-4 w-4 text-primary" /> Full Detailed Explanation
+                  </h4>
+                  <p className="text-[11px] sm:text-xs text-muted-foreground max-w-md">
+                    Generate comprehensive multi-section breakdowns, molecular mechanisms, step-by-step pathways, comparison tables, and exam golden pearls.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => onExplain(node, 'standard', 'full')}
+                  disabled={isExplaining}
+                  className="text-xs font-semibold gap-1.5 shrink-0 bg-primary text-primary-foreground shadow-xs"
+                >
+                  {isExplaining ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  <span>Generate Full Explanation</span>
+                </Button>
+              </div>
+            )}
+
+            {/* If Full Standard Explanation is already generated */}
+            {standardExplanation && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center justify-between text-xs text-muted-foreground pb-2 border-b">
+                  <span className="font-semibold text-foreground flex items-center gap-1.5">
+                    <BookOpen className="h-3.5 w-3.5 text-primary" /> Rigorous Clinical / Academic Workup (Full Breakdown)
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {!conciseExplanation && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onExplain(node, 'standard', 'concise')}
+                        disabled={isExplaining}
+                        className="h-6 text-[11px] gap-1 border-sky-500/30 text-sky-600 dark:text-sky-400 hover:bg-sky-500/10"
+                      >
+                        <Zap className="h-3 w-3" /> 50-100w Summary
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onExplain(node, 'standard', 'full')}
+                      disabled={isExplaining}
+                      className="h-6 text-[11px] gap-1 text-muted-foreground hover:text-primary"
+                    >
+                      <RefreshCw className="h-3 w-3" /> Re-generate Full Workup
+                    </Button>
+                  </div>
+                </div>
                 <ClinicalMarkdownRenderer content={standardExplanation} />
               </div>
-            ) : !isExplaining ? (
+            )}
+
+            {/* If neither Concise nor Standard explanation is generated */}
+            {!conciseExplanation && !standardExplanation && !isExplaining && (
               <div className="py-12 text-center space-y-3">
                 <div className="p-3.5 rounded-2xl bg-primary/10 text-primary w-fit mx-auto border border-primary/20">
                   <BookOpen className="h-6 w-6" />
                 </div>
                 <div className="space-y-1">
-                  <h4 className="text-sm font-bold text-foreground">Standard Explanation Not Yet Generated</h4>
+                  <h4 className="text-sm font-bold text-foreground">Explanation Not Yet Generated</h4>
                   <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-                    Generate a full academic/clinical breakdown with definitions, step-by-step pathways, and high-yield rules.
+                    Generate a crisp 50–100 word high-yield summary, or dive straight into a full comprehensive workup.
                   </p>
                 </div>
-                <Button
-                  size="sm"
-                  onClick={() => onExplain(node, 'standard')}
-                  className="text-xs font-semibold gap-1.5"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Generate Standard Workup
-                </Button>
+                <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
+                  <Button
+                    size="sm"
+                    onClick={() => onExplain(node, 'standard', 'concise')}
+                    className="text-xs font-semibold gap-1.5"
+                  >
+                    <Zap className="h-3.5 w-3.5 text-amber-300 fill-amber-300" />
+                    Generate Concise (50–100 words)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onExplain(node, 'standard', 'full')}
+                    className="text-xs font-semibold gap-1.5"
+                  >
+                    <BookOpen className="h-3.5 w-3.5" />
+                    Generate Full Workup
+                  </Button>
+                </div>
               </div>
-            ) : null}
+            )}
           </div>
         )}
 

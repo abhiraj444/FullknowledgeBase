@@ -433,7 +433,8 @@ function KnowledgeMapContent() {
   // Explain a specific node
   const handleExplainNode = async (
     node: KnowledgeTreeNode,
-    mode: 'standard' | 'first_principles' | 'simplified'
+    mode: 'standard' | 'first_principles' | 'simplified',
+    detailLevel: 'concise' | 'full' = 'concise'
   ) => {
     if (!knowledgeMap || !isConfigured) return;
 
@@ -443,7 +444,7 @@ function KnowledgeMapContent() {
     setMobileActiveTab('study');
 
     const modeLabels = {
-      standard: 'Standard Academic / Clinical Workup',
+      standard: detailLevel === 'concise' ? 'Concise Summary (50-100 words)' : 'Full Academic / Clinical Workup',
       first_principles: 'First-Principles Fundamental Truths',
       simplified: 'Intuitive Analogy & Simplification',
     };
@@ -467,6 +468,7 @@ function KnowledgeMapContent() {
           rootTitle: lineage[0],
           siblingTitles: siblings,
           mode,
+          detailLevel,
           language,
           audienceMode,
           onStreamChunk: (chunk) => {
@@ -480,7 +482,7 @@ function KnowledgeMapContent() {
       );
 
       // Update node explanation in tree
-      const updatedTree = updateNodeExplanation(knowledgeMap.tree, node.id, mode, explanation);
+      const updatedTree = updateNodeExplanation(knowledgeMap.tree, node.id, mode, explanation, detailLevel);
       const updatedMap: KnowledgeMapData = {
         ...knowledgeMap,
         tree: updatedTree,
@@ -490,7 +492,7 @@ function KnowledgeMapContent() {
       saveMapToDatabase(updatedMap);
 
       toast({
-        title: 'Explanation Ready',
+        title: detailLevel === 'concise' ? '⚡ Concise Summary Ready' : '📖 Full Workup Ready',
         description: `Derived ${modeLabels[mode]} for "${node.title}".`,
       });
     } catch (err: any) {
@@ -962,34 +964,24 @@ function KnowledgeMapContent() {
         </Card>
       )}
 
-      {/* 3-Box AI Request, Reasoning & Stream Inspector (Persistent Console) */}
-      {(isGenerating || Boolean(isDissectingNodeId) || Boolean(isExplainingNodeId) || Boolean(streamText || streamThinking || streamInputPrompt)) && (
+      {/* 3-Box AI Request, Reasoning & Stream Inspector (Whole Tree Synthesis Only) */}
+      {(!knowledgeMap || isGenerating) && (isGenerating || Boolean(streamText || streamThinking || streamInputPrompt)) && (
         <AiStreamingRawLogBox
-          title={
-            isDissectingNodeId
-              ? 'AI Dissection Console (Subtopic Expansion)'
-              : isExplainingNodeId
-              ? 'AI First-Principles Explanation Console'
-              : 'Knowledge Tree Synthesis & Stream Console'
-          }
+          title="Knowledge Tree Synthesis & Stream Console"
           currentStep={
             streamStep ||
             (isGenerating
               ? 'Constructing hierarchical knowledge tree...'
-              : isDissectingNodeId
-              ? 'Dissecting subtopic principles...'
-              : isExplainingNodeId
-              ? 'Deriving academic & clinical explanation...'
               : 'Knowledge synthesis ready.')
           }
           inputPrompt={streamInputPrompt}
           thinkingText={streamThinking}
           streamText={streamText}
           modelName={streamModelName}
-          isLoading={isGenerating || Boolean(isDissectingNodeId) || Boolean(isExplainingNodeId)}
+          isLoading={isGenerating}
           onStop={handleStopGeneration}
           permanent={true}
-          defaultExpanded={isGenerating || Boolean(isDissectingNodeId) || Boolean(isExplainingNodeId)}
+          defaultExpanded={isGenerating}
         />
       )}
 
@@ -1184,7 +1176,7 @@ function RecursiveNodeRenderer({
   onSelect: (node: KnowledgeTreeNode) => void;
   onToggleExpand: (nodeId: string) => void;
   onDissect: (node: KnowledgeTreeNode) => void;
-  onExplain: (node: KnowledgeTreeNode, mode: 'standard' | 'first_principles' | 'simplified') => void;
+  onExplain: (node: KnowledgeTreeNode, mode: 'standard' | 'first_principles' | 'simplified', detailLevel?: 'concise' | 'full') => void;
   onAddNote: (node: KnowledgeTreeNode) => void;
   isDissectingNodeId: string | null;
   isExplainingNodeId: string | null;
@@ -1248,7 +1240,7 @@ function countTotalNodes(tree: KnowledgeTreeNode[]): number {
 function countExploredNodes(tree: KnowledgeTreeNode[]): number {
   let count = 0;
   for (const n of tree) {
-    if (n.explanation?.standard || n.explanation?.firstPrinciples || n.explanation?.simplified) {
+    if (n.explanation?.concise || n.explanation?.standard || n.explanation?.firstPrinciples || n.explanation?.simplified) {
       count += 1;
     }
     if (n.children) {
@@ -1322,14 +1314,22 @@ function updateNodeExplanation(
   tree: KnowledgeTreeNode[],
   targetId: string,
   mode: 'standard' | 'first_principles' | 'simplified',
-  explanationText: string
+  explanationText: string,
+  detailLevel: 'concise' | 'full' = 'concise'
 ): KnowledgeTreeNode[] {
   return tree.map((node) => {
     if (node.id === targetId) {
       const currentExplanation = node.explanation || {};
       const updatedExplanation = {
         ...currentExplanation,
-        [mode === 'standard' ? 'standard' : mode === 'first_principles' ? 'firstPrinciples' : 'simplified']: explanationText,
+        ...(mode === 'standard'
+          ? detailLevel === 'concise'
+            ? { concise: explanationText }
+            : { standard: explanationText }
+          : mode === 'first_principles'
+          ? { firstPrinciples: explanationText }
+          : { simplified: explanationText }),
+        lastUpdated: Date.now(),
       };
       return {
         ...node,
@@ -1339,7 +1339,7 @@ function updateNodeExplanation(
     if (node.children) {
       return {
         ...node,
-        children: updateNodeExplanation(node.children, targetId, mode, explanationText),
+        children: updateNodeExplanation(node.children, targetId, mode, explanationText, detailLevel),
       };
     }
     return node;
