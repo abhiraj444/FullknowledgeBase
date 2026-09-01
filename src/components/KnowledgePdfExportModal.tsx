@@ -1821,7 +1821,7 @@ export function KnowledgePdfExportModal({
                         <Zap className="h-3.5 w-3.5 text-sky-600" /> Concise Summaries
                       </span>
                       <p className="text-[10px] text-muted-foreground">
-                        Include high-yield 50–100 word overviews
+                        Include high-yield quick overviews
                       </p>
                     </div>
                     <Switch checked={includeConcise} onCheckedChange={setIncludeConcise} />

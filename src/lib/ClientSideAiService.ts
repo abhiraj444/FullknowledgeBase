@@ -2628,7 +2628,7 @@ Produce ONLY the Markdown bullet list or "NO_FURTHER_SUBTOPICS".`;
     /**
      * Surgical Token-Efficient Node Explanation:
      * Explains a specific subtopic using Standard, First-Principles, or Simplified Analogy lens.
-     * Supports both concise (50-100 words) and full comprehensive workups.
+     * Supports both concise (quick high-yield overview) and full comprehensive workups.
      * Uses ONLY Document Summary + Lineage Path (Parent + Node + Siblings).
      */
     async explainKnowledgeNode(
@@ -2651,13 +2651,15 @@ Produce ONLY the Markdown bullet list or "NO_FURTHER_SUBTOPICS".`;
 
         let modeInstructions = '';
         if (input.detailLevel === 'concise' && input.mode === 'standard') {
-            modeInstructions = `**Lens: High-Yield Concise Overview (Strictly 50 to 100 Words)**
-- Provide a punchy, crystal-clear conceptual synthesis in strictly 50 to 100 words.
-- Structure briefly with:
-  - **Core Concept & Definition**: What is it in one clear sentence?
-  - **Essential Mechanism / Key Action**: How does it work concisely?
-  - **High-Yield Takeaway / Rule**: The single most critical exam/clinical pearl.
-- Keep it direct, crisp, and high-impact without filler phrases or conversational meta-commentary.`;
+            modeInstructions = `**Lens: High-Yield Quick Overview**
+- Provide a brief, high-yield overview that can be read in one go and easily understood without overwhelming detail.
+- Focus on the core definition, essential mechanism, and single most critical takeaway.
+- Keep it concise, accessible, and direct. Do not write an overly long exhaustive essay or multi-page workup here (detailed exhaustive breakdown is available separately).
+- Structure with:
+  - **Core Concept & Definition**: What is it in plain, crystal-clear terms?
+  - **Essential Mechanism / Key Action**: How does it work (concise bullet points or short steps)?
+  - **High-Yield Takeaway / Rule**: The single key rule or clinical pearl to remember.
+- Do NOT spend time counting words or writing meta-commentary. Just write a clear, scannable quick summary directly.`;
         } else if (input.mode === 'first_principles') {
             modeInstructions = `**Lens: First-Principles Derivation (Ground-Up Truths)**
 - Deconstruct this concept down to its absolute fundamental truths (physics, biochemistry, physiology, or foundational mathematical/logical rules).

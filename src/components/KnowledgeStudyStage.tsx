@@ -307,7 +307,7 @@ export function KnowledgeStudyStage({
           />
         )}
 
-        {/* Tab 1: Standard Explanation (Concise 50-100w Overview + On-Demand Full Workup) */}
+        {/* Tab 1: Standard Explanation (Concise Overview + On-Demand Full Workup) */}
         {activeTab === 'standard' && (
           <div className="space-y-4">
             {/* If Concise Explanation is present */}
@@ -316,7 +316,7 @@ export function KnowledgeStudyStage({
                 <div className="flex items-center justify-between gap-2 pb-2 border-b border-sky-500/20">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-xs sm:text-sm text-sky-800 dark:text-sky-300 flex items-center gap-1.5">
-                      <Zap className="h-4 w-4 text-sky-500 fill-sky-500/20" /> Concise Overview
+                      <Zap className="h-4 w-4 text-sky-500 fill-sky-500/20" /> Quick Overview
                     </span>
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-sky-500/40 text-sky-700 dark:text-sky-300 bg-sky-500/10">
                       {conciseExplanation.split(/\s+/).filter(Boolean).length} words
@@ -328,7 +328,7 @@ export function KnowledgeStudyStage({
                     onClick={() => onExplain(node, 'standard', 'concise')}
                     disabled={isExplaining}
                     className="h-6 text-[11px] gap-1 text-sky-700 dark:text-sky-300 hover:bg-sky-500/15"
-                    title="Re-generate concise summary"
+                    title="Re-generate concise overview"
                   >
                     <RefreshCw className="h-3 w-3" /> Re-generate
                   </Button>
@@ -380,7 +380,7 @@ export function KnowledgeStudyStage({
                         disabled={isExplaining}
                         className="h-6 text-[11px] gap-1 border-sky-500/30 text-sky-600 dark:text-sky-400 hover:bg-sky-500/10"
                       >
-                        <Zap className="h-3 w-3" /> 50-100w Summary
+                        <Zap className="h-3 w-3" /> Quick Summary
                       </Button>
                     )}
                     <Button
@@ -407,7 +407,7 @@ export function KnowledgeStudyStage({
                 <div className="space-y-1">
                   <h4 className="text-sm font-bold text-foreground">Explanation Not Yet Generated</h4>
                   <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-                    Generate a crisp 50–100 word high-yield summary, or dive straight into a full comprehensive workup.
+                    Generate a quick, readable high-yield overview, or dive straight into a full comprehensive workup.
                   </p>
                 </div>
                 <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
@@ -417,7 +417,7 @@ export function KnowledgeStudyStage({
                     className="text-xs font-semibold gap-1.5"
                   >
                     <Zap className="h-3.5 w-3.5 text-amber-300 fill-amber-300" />
-                    Generate Concise (50–100 words)
+                    Generate Quick Overview
                   </Button>
                   <Button
                     variant="outline"

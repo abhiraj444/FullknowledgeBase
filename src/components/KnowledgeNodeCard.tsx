@@ -166,7 +166,7 @@ export function KnowledgeNodeCard({
               {/* Status Chips */}
               {hasConcise && !hasStandard && (
                 <span className="stamp-badge text-[8px] py-0 px-1 border-sky-500/40 text-sky-600 dark:text-sky-400 bg-sky-500/5">
-                  ⚡ 50-100w
+                  ⚡ Concise
                 </span>
               )}
               {hasStandard && (

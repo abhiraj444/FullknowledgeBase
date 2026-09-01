@@ -444,7 +444,7 @@ function KnowledgeMapContent() {
     setMobileActiveTab('study');
 
     const modeLabels = {
-      standard: detailLevel === 'concise' ? 'Concise Summary (50-100 words)' : 'Full Academic / Clinical Workup',
+      standard: detailLevel === 'concise' ? 'Quick Concise Overview' : 'Full Academic / Clinical Workup',
       first_principles: 'First-Principles Fundamental Truths',
       simplified: 'Intuitive Analogy & Simplification',
     };
