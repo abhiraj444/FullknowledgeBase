@@ -70,6 +70,8 @@ import { generatePptx } from '@/lib/ppt-generator';
 import PptxGenJS from 'pptxgenjs';
 import { AiStreamingRawLogBox } from './AiStreamingRawLogBox';
 
+import { formatMathAndLatexForExport } from '@/lib/math-formatter';
+
 export type { Slide };
 
 interface MarkdownBlock {
@@ -82,33 +84,7 @@ interface MarkdownBlock {
 
 function cleanMarkdownForPdf(text: string): string {
   if (!text) return '';
-  return text
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    .replace(/__(.*?)__/g, '$1')
-    .replace(/_(.*?)_/g, '$1')
-    .replace(/`(.*?)`/g, '$1')
-    .replace(/\[(.*?)\]\(.*?\)/g, '$1')
-    .replace(/\$\$(.*?)\$\$/gs, '$1')
-    .replace(/\$(.*?)\$/g, '$1')
-    .replace(/\\\[(.*?)\\\]/gs, '$1')
-    .replace(/\\\((.*?)\\\)/g, '$1')
-    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '$1 / $2')
-    .replace(/\\text\{([^}]+)\}/g, '$1')
-    .replace(/\\rightarrow/g, '→')
-    .replace(/\\leftarrow/g, '←')
-    .replace(/\\uparrow/g, '↑')
-    .replace(/\\downarrow/g, '↓')
-    .replace(/\\pm/g, '±')
-    .replace(/\\le(q)?/g, '≤')
-    .replace(/\\ge(q)?/g, '≥')
-    .replace(/\\approx/g, '≈')
-    .replace(/\\times/g, '×')
-    .replace(/\\degree/g, '°')
-    .replace(/\\circ/g, '°')
-    .replace(/\\([a-zA-Z]+)/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return formatMathAndLatexForExport(text);
 }
 
 function parseDocxTextRuns(text: string, defaultBold = false, defaultItalic = false): TextRun[] {

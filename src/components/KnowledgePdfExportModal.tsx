@@ -37,6 +37,7 @@ import 'jspdf-autotable';
 import { registerNotoSansRegular } from '@/lib/pdf-fonts/NotoSansRegular';
 import { registerNotoSansBold } from '@/lib/pdf-fonts/NotoSansBold';
 import { registerNotoSansItalic } from '@/lib/pdf-fonts/NotoSansItalic';
+import { formatMathAndLatexForExport } from '@/lib/math-formatter';
 
 interface KnowledgePdfExportModalProps {
   isOpen: boolean;
@@ -59,7 +60,8 @@ function escapeHtml(str: string): string {
 }
 
 /**
- * Strips leading numbering or bullet tokens from a node title to prevent double-prefixing.
+ * Strips leading numbering or bullet tokens from a node title to prevent double-prefixing,
+ * while formatting mathematical formulas and symbols into clean Unicode text.
  */
 function cleanNodeTitle(rawTitle: string): string {
   if (!rawTitle) return '';
@@ -67,7 +69,7 @@ function cleanNodeTitle(rawTitle: string): string {
     .replace(/^(\d+(\.\d+)*[\.:\s-]+)+/i, '')
     .replace(/^[•\-\*]\s+/, '')
     .trim();
-  return cleaned || rawTitle.trim();
+  return formatMathAndLatexForExport(cleaned || rawTitle.trim());
 }
 
 /**
@@ -75,7 +77,27 @@ function cleanNodeTitle(rawTitle: string): string {
  */
 function stripMarkdown(md: string): string {
   if (!md) return '';
-  return md
+  return formatMathAndLatexForExport(md);
+}
+
+/**
+ * Formats inline bold, italic, code, and symbols within markdown text.
+ */
+function formatInline(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/(\*\*|__)([\s\S]+?)\1/g, '<strong>$2</strong>')
+    .replace(/(\*|_)([\s\S]+?)\1/g, '<em>$2</em>')
+    .replace(/`([^`]+)`/g, '<code style="background-color: #f1f5f9; padding: 1px 4px; border-radius: 4px; font-family: monospace; font-size: 8.5pt;">$1</code>');
+}
+
+/**
+ * Converts markdown formatting and LaTeX math to clean semantic HTML for printing.
+ */
+function simpleMarkdownToHtml(md: string): string {
+  if (!md) return '';
+
+  let text = md
     .replace(/\\\[\s*/g, '')
     .replace(/\s*\\\]/g, '')
     .replace(/\\\(\s*/g, '')
@@ -112,66 +134,6 @@ function stripMarkdown(md: string): string {
     .replace(/\\notin\b/g, '∉')
     .replace(/\\subset\b/g, '⊂')
     .replace(/\\subseteq\b/g, '⊆')
-    .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
-    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
-    .replace(/\\text\{([^}]+)\}/g, '$1')
-    .replace(/\\mathrm\{([^}]+)\}/g, '$1')
-    .replace(/\\mathbf\{([^}]+)\}/g, '$1')
-    .replace(/\\textbf\{([^}]+)\}/g, '$1')
-    .replace(/\\rightarrow\b/g, '→')
-    .replace(/\\leftarrow\b/g, '←')
-    .replace(/\\degree\b/g, '°')
-    .replace(/\^2\b/g, '²')
-    .replace(/\^3\b/g, '³')
-    .replace(/_\{([^}]+)\}/g, '_$1')
-    .replace(/\^\{([^}]+)\}/g, '^$1')
-    .replace(/\$\$/g, '')
-    .replace(/\$/g, '')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/\*([^*]+)\*/g, '$1')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/^#+\s+/gm, '')
-    .replace(/^[-*]\s+/gm, '• ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-/**
- * Formats inline bold, italic, code, and symbols within markdown text.
- */
-function formatInline(str: string): string {
-  if (!str) return '';
-  return str
-    .replace(/(\*\*|__)([\s\S]+?)\1/g, '<strong>$2</strong>')
-    .replace(/(\*|_)([\s\S]+?)\1/g, '<em>$2</em>')
-    .replace(/`([^`]+)`/g, '<code style="background-color: #f1f5f9; padding: 1px 4px; border-radius: 4px; font-family: monospace; font-size: 8.5pt;">$1</code>');
-}
-
-/**
- * Converts markdown formatting and LaTeX math to clean semantic HTML for printing.
- */
-function simpleMarkdownToHtml(md: string): string {
-  if (!md) return '';
-
-  let text = md
-    .replace(/\\propto\b/g, '∝')
-    .replace(/\\cdot\b/g, '·')
-    .replace(/\\times\b/g, '×')
-    .replace(/\\odot\b/g, '☉')
-    .replace(/\\oplus\b/g, '⊕')
-    .replace(/\\Delta\b/g, 'Δ')
-    .replace(/\\pi\b/g, 'π')
-    .replace(/\\theta\b/g, 'θ')
-    .replace(/\\alpha\b/g, 'α')
-    .replace(/\\beta\b/g, 'β')
-    .replace(/\\mu\b/g, 'μ')
-    .replace(/\\sigma\b/g, 'σ')
-    .replace(/\\approx\b/g, '≈')
-    .replace(/\\neq?\b/g, '≠')
-    .replace(/\\leq?\b/g, '≤')
-    .replace(/\\geq?\b/g, '≥')
-    .replace(/\\pm\b/g, '±')
-    .replace(/\\infty\b/g, '∞')
     .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
     .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
     .replace(/\\text\{([^}]+)\}/g, '$1')
@@ -540,70 +502,7 @@ function renderPdfCard(params: PdfCardRenderParams): number {
 
 function cleanMarkdownForPdf(text: string): string {
   if (!text) return '';
-  return text
-    .replace(/^```[a-zA-Z0-9_-]*\n?/gm, '')
-    .replace(/```$/gm, '')
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    .replace(/__(.*?)__/g, '$1')
-    .replace(/_(.*?)_/g, '$1')
-    .replace(/`+(.*?)`+/g, '$1')
-    .replace(/\[(.*?)\]\(.*?\)/g, '$1')
-    .replace(/\$\$(.*?)\$\$/gs, '$1')
-    .replace(/\$(.*?)\$/g, '$1')
-    .replace(/\\\[(.*?)\\\]/gs, '$1')
-    .replace(/\\\((.*?)\\\)/g, '$1')
-    .replace(/\\propto\b/g, '∝')
-    .replace(/\\cdot\b/g, '·')
-    .replace(/\\times\b/g, '×')
-    .replace(/\\div\b/g, '÷')
-    .replace(/\\odot\b/g, '☉')
-    .replace(/\\oplus\b/g, '⊕')
-    .replace(/\\Delta\b/g, 'Δ')
-    .replace(/\\pi\b/g, 'π')
-    .replace(/\\theta\b/g, 'θ')
-    .replace(/\\alpha\b/g, 'α')
-    .replace(/\\beta\b/g, 'β')
-    .replace(/\\gamma\b/g, 'γ')
-    .replace(/\\mu\b/g, 'μ')
-    .replace(/\\sigma\b/g, 'σ')
-    .replace(/\\omega\b/g, 'ω')
-    .replace(/\\Omega\b/g, 'Ω')
-    .replace(/\\lambda\b/g, 'λ')
-    .replace(/\\epsilon\b/g, 'ε')
-    .replace(/\\approx\b/g, '≈')
-    .replace(/\\neq?\b/g, '≠')
-    .replace(/\\leq?\b/g, '≤')
-    .replace(/\\geq?\b/g, '≥')
-    .replace(/\\pm\b/g, '±')
-    .replace(/\\infty\b/g, '∞')
-    .replace(/\\partial\b/g, '∂')
-    .replace(/\\nabla\b/g, '∇')
-    .replace(/\\sum\b/g, '∑')
-    .replace(/\\int\b/g, '∫')
-    .replace(/\\in\b/g, '∈')
-    .replace(/\\notin\b/g, '∉')
-    .replace(/\\subset\b/g, '⊂')
-    .replace(/\\subseteq\b/g, '⊆')
-    .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
-    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
-    .replace(/\\text\{([^}]+)\}/g, '$1')
-    .replace(/\\mathrm\{([^}]+)\}/g, '$1')
-    .replace(/\\mathbf\{([^}]+)\}/g, '$1')
-    .replace(/\\textbf\{([^}]+)\}/g, '$1')
-    .replace(/\\rightarrow\b/g, '→')
-    .replace(/\\leftarrow\b/g, '←')
-    .replace(/\\uparrow\b/g, '↑')
-    .replace(/\\downarrow\b/g, '↓')
-    .replace(/\\degree\b/g, '°')
-    .replace(/\\circ\b/g, '°')
-    .replace(/\^2\b/g, '²')
-    .replace(/\^3\b/g, '³')
-    .replace(/_\{([^}]+)\}/g, '_$1')
-    .replace(/\^\{([^}]+)\}/g, '^$1')
-    .replace(/\\([a-zA-Z]+)/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return formatMathAndLatexForExport(text);
 }
 
 interface MarkdownBlock {

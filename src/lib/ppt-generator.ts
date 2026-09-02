@@ -1,5 +1,6 @@
 import PptxGenJS from 'pptxgenjs';
 import type { Slide, ContentItem } from '@/types';
+import { formatMathAndLatexForExport } from '@/lib/math-formatter';
 
 // --- CONFIGURATION --- //
 const SLIDE_WIDTH = 10; // inches
@@ -23,50 +24,7 @@ const TITLE_OPTIONS = {
  */
 export function cleanLatexForPptx(text: string): string {
   if (!text) return '';
-  return text
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/?[^>]+(>|$)/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/\$\$\s*([\s\S]*?)\s*\$\$/g, '$1')
-    .replace(/\$\s*([\s\S]*?)\s*\$/g, '$1')
-    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
-    .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
-    .replace(/\\text\{([^}]+)\}/g, '$1')
-    .replace(/\\mathrm\{([^}]+)\}/g, '$1')
-    .replace(/\\mathbf\{([^}]+)\}/g, '$1')
-    .replace(/\\textbf\{([^}]+)\}/g, '$1')
-    .replace(/\\mathit\{([^}]+)\}/g, '$1')
-    .replace(/\\approx\b/g, '≈')
-    .replace(/\\Delta\b/g, 'Δ')
-    .replace(/\\pm\b/g, '±')
-    .replace(/\\times\b/g, '×')
-    .replace(/\\cdot\b/g, '·')
-    .replace(/\\le\b|\\leq\b/g, '≤')
-    .replace(/\\ge\b|\\geq\b/g, '≥')
-    .replace(/\\neq\b/g, '≠')
-    .replace(/\\propto\b/g, '∝')
-    .replace(/\\to\b|\\rightarrow\b/g, '→')
-    .replace(/\\leftarrow\b/g, '←')
-    .replace(/\\uparrow\b/g, '↑')
-    .replace(/\\downarrow\b/g, '↓')
-    .replace(/\\alpha\b/g, 'α')
-    .replace(/\\beta\b/g, 'β')
-    .replace(/\\gamma\b/g, 'γ')
-    .replace(/\\theta\b/g, 'θ')
-    .replace(/\\lambda\b/g, 'λ')
-    .replace(/\\mu\b/g, 'μ')
-    .replace(/\\pi\b/g, 'π')
-    .replace(/\\sigma\b/g, 'σ')
-    .replace(/\\omega\b/g, 'ω')
-    .replace(/\\Omega\b/g, 'Ω')
-    .replace(/\\sum\b/g, 'Σ')
-    .replace(/\\int\b/g, '∫')
-    .replace(/\\partial\b/g, '∂')
-    .replace(/\\degree\b|\\circ\b/g, '°');
+  return formatMathAndLatexForExport(text);
 }
 
 /**

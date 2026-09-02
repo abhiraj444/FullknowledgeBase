@@ -3171,6 +3171,9 @@ export function parseMarkdownKnowledgeOutline(
                     const numString = numMatch[1];
                     const dots = (numString.match(/\./g) || []).length;
                     dotDepth = dots;
+                    if (numMatch[2] && numMatch[2].trim()) {
+                        rawContent = numMatch[2].trim();
+                    }
                 }
             } else if (headingMatch) {
                 const headingLevel = headingMatch[1].length;
