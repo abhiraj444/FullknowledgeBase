@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { KnowledgeTreeNode } from '@/types';
+import { InlineMarkdownRenderer } from '@/components/ClinicalMarkdownRenderer';
 
 interface KnowledgeNodeCardProps {
   node: KnowledgeTreeNode;
@@ -193,21 +194,23 @@ export function KnowledgeNodeCard({
                 isSelected && 'text-primary'
               )}
             >
-              {node.title}
+              <InlineMarkdownRenderer content={node.title} />
             </h3>
 
             {/* Description */}
             {node.description && (
-              <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed line-clamp-2">
-                {node.description}
-              </p>
+              <div className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">
+                <InlineMarkdownRenderer content={node.description} />
+              </div>
             )}
 
             {/* First-Principle Anchor in-card callout */}
             {node.firstPrincipleAnchor && (
               <div className="text-[10px] sm:text-[11px] text-amber-900 dark:text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-md px-2 py-1 flex items-start gap-1 mt-1">
                 <span className="font-bold shrink-0">⚡ Ground Truth:</span>
-                <span className="italic">{node.firstPrincipleAnchor}</span>
+                <span className="italic">
+                  <InlineMarkdownRenderer content={node.firstPrincipleAnchor} />
+                </span>
               </div>
             )}
           </div>

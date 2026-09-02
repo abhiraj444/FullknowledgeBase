@@ -52,7 +52,7 @@ import { useSettings } from '@/context/SettingsContext';
 import { useToast } from '@/hooks/use-toast';
 import { isPdfFile, convertPdfToImages } from '@/lib/pdf-to-images';
 import { prepareImagesForAiPrompt } from '@/lib/image-compressor';
-import ClinicalMarkdownRenderer from '@/components/ClinicalMarkdownRenderer';
+import ClinicalMarkdownRenderer, { InlineMarkdownRenderer } from '@/components/ClinicalMarkdownRenderer';
 
 interface BoldRendererProps {
   text: string;
@@ -62,93 +62,7 @@ interface BoldRendererProps {
 
 const BoldRenderer: React.FC<BoldRendererProps> = ({ text, bold = [], className = '' }) => {
   if (!text) return null;
-
-  // Helper to highlight a plain string segment using the explicit bold array if supplied
-  const renderSegmentWithBoldArray = (segment: string, keyPrefix: string): React.ReactNode => {
-    if (!segment) return null;
-    if (bold && bold.length > 0) {
-      const validBold = bold.filter((b) => b && b.trim().length > 0);
-      if (validBold.length > 0) {
-        const boldEscaped = validBold.map((b) => b.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'));
-        const regex = new RegExp(`(${boldEscaped.join('|')})`, 'gi');
-        const parts = segment.split(regex);
-        return parts.map((part, i) => {
-          const isMatch = validBold.some((b) => b.toLowerCase() === part.toLowerCase());
-          return isMatch ? (
-            <strong
-              key={`${keyPrefix}-b-${i}`}
-              className="font-bold text-foreground underline decoration-primary/40 decoration-2 underline-offset-2"
-            >
-              {part}
-            </strong>
-          ) : (
-            <span key={`${keyPrefix}-t-${i}`}>{part}</span>
-          );
-        });
-      }
-    }
-    return segment;
-  };
-
-  // 1. Process Markdown Bold syntax (**...** or __...__) and Inline Math ($...$)
-  // Regex matches: **bold**, __bold__, and $math$
-  const tokenRegex = /(\*\*(.*?)\*\*|__(.*?)__|(?:\$)([^$]+?)(?:\$))/g;
-  const parts: React.ReactNode[] = [];
-  let lastIdx = 0;
-  let match: RegExpExecArray | null;
-  let keyIdx = 0;
-
-  while ((match = tokenRegex.exec(text)) !== null) {
-    if (match.index > lastIdx) {
-      const preceding = text.slice(lastIdx, match.index);
-      parts.push(renderSegmentWithBoldArray(preceding, `pre-${keyIdx++}`));
-    }
-
-    if (match[2] !== undefined) {
-      // **bold**
-      parts.push(
-        <strong
-          key={`md-bold-${keyIdx++}`}
-          className="font-bold text-foreground underline decoration-primary/40 decoration-2 underline-offset-2"
-        >
-          {match[2]}
-        </strong>
-      );
-    } else if (match[3] !== undefined) {
-      // __bold__
-      parts.push(
-        <strong
-          key={`md-under-${keyIdx++}`}
-          className="font-bold text-foreground underline decoration-primary/40 decoration-2 underline-offset-2"
-        >
-          {match[3]}
-        </strong>
-      );
-    } else if (match[4] !== undefined) {
-      // $math$
-      parts.push(
-        <code
-          key={`math-${keyIdx++}`}
-          className="px-1 py-0.5 rounded bg-muted/60 font-mono text-[11px] text-foreground"
-        >
-          {match[4]}
-        </code>
-      );
-    }
-
-    lastIdx = match.index + match[0].length;
-  }
-
-  if (lastIdx < text.length) {
-    const trailing = text.slice(lastIdx);
-    parts.push(renderSegmentWithBoldArray(trailing, `post-${keyIdx++}`));
-  }
-
-  if (parts.length > 0) {
-    return <span className={`${className} text-wrap`}>{parts}</span>;
-  }
-
-  return <span className={className}>{renderSegmentWithBoldArray(text, 'root')}</span>;
+  return <InlineMarkdownRenderer content={text} boldKeywords={bold} className={className} />;
 };
 
 interface CompactSlideTableProps {
@@ -630,7 +544,7 @@ export const EnhancedSlideRenderer: React.FC<EnhancedSlideRendererProps> = ({
               </span>
               {slide.summary && (
                 <span className="text-xs font-handwriting text-muted-foreground hidden sm:inline truncate max-w-md">
-                  — {slide.summary}
+                  — <InlineMarkdownRenderer content={slide.summary} />
                 </span>
               )}
             </div>
@@ -656,7 +570,7 @@ export const EnhancedSlideRenderer: React.FC<EnhancedSlideRendererProps> = ({
           </div>
 
           <h2 className="text-xl sm:text-2xl font-extrabold text-foreground tracking-tight leading-snug">
-            {slide.title}
+            <InlineMarkdownRenderer content={slide.title} />
           </h2>
         </div>
 

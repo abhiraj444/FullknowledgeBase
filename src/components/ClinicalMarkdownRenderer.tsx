@@ -210,7 +210,7 @@ function normalizeBiomedicalNotation(raw: string): string {
   text = cleanedLines.join('\n');
 
   // 2. Normalize unescaped double-backslashes from JSON string serialization (e.g. \\frac -> \frac)
-  text = text.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
+  text = text.replace(/\\\\([a-zA-Z]+|\{|\}|_|\^|\$|,|;|:|!|\[|\])/g, '\\$1');
 
   // 3. Convert standard LaTeX display math \[ ... \] into $$ ... $$ using function callback to avoid $1 escape bug
   text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => {
@@ -227,13 +227,90 @@ function normalizeBiomedicalNotation(raw: string): string {
 
   // 6. Support common clinical/biomedical arrows and degree shorthand outside math
   text = text
-    .replace(/\\uparrow\b/g, '↑')
-    .replace(/\\downarrow\b/g, '↓')
-    .replace(/\\rightarrow\b/g, '→')
-    .replace(/\\leftarrow\b/g, '←')
-    .replace(/\\degree\b/g, '°');
+    .replace(/(?<!\\)\\degree\b/g, '°');
 
   return text;
+}
+
+const katexOptions = {
+  throwOnError: false,
+  strict: false,
+  trust: true,
+  macros: {
+    '\\odot': '\\odot',
+    '\\oplus': '\\oplus',
+    '\\degree': '^{\\circ}',
+  },
+};
+
+export interface InlineMarkdownRendererProps {
+  content?: string | null;
+  className?: string;
+  boldKeywords?: string[];
+}
+
+/**
+ * Compact inline Markdown and LaTeX math renderer.
+ * Safely renders inline math ($...$, \(...\)), display math ($$...$$, \[...\]), bold, italic,
+ * code, and links without introducing block-level paragraph margins or breaking card layouts.
+ */
+export function InlineMarkdownRenderer({
+  content,
+  className = '',
+  boldKeywords,
+}: InlineMarkdownRendererProps) {
+  if (!content) return null;
+
+  let text = extractReadableContent(content);
+  text = normalizeBiomedicalNotation(text);
+
+  if (boldKeywords && boldKeywords.length > 0) {
+    const valid = boldKeywords.filter((b) => b && b.trim().length > 0);
+    if (valid.length > 0) {
+      const boldEscaped = valid.map((b) => b.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'));
+      const regex = new RegExp(`(?<!\\*\\*|__)\\b(${boldEscaped.join('|')})\\b(?!\\*\\*|__)`, 'gi');
+      text = text.replace(regex, '**$1**');
+    }
+  }
+
+  return (
+    <span className={`inline-markdown inline break-words ${className}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, katexOptions]]}
+        components={{
+          p: ({ children }) => <span className="inline leading-relaxed">{children}</span>,
+          h1: ({ children }) => <span className="font-bold text-foreground">{children}</span>,
+          h2: ({ children }) => <span className="font-bold text-foreground">{children}</span>,
+          h3: ({ children }) => <span className="font-semibold text-foreground">{children}</span>,
+          h4: ({ children }) => <span className="font-semibold text-foreground">{children}</span>,
+          strong: ({ children }) => (
+            <strong className="font-bold text-foreground underline decoration-primary/40 decoration-1 underline-offset-2">
+              {children}
+            </strong>
+          ),
+          em: ({ children }) => <em className="italic">{children}</em>,
+          code: ({ children, className }: any) => {
+            const isInline = !className;
+            return isInline ? (
+              <code className="px-1 py-0.5 rounded bg-muted/80 font-mono text-[11px] text-foreground border border-border/50">
+                {children}
+              </code>
+            ) : (
+              <code className="font-mono text-[11px] text-foreground">{children}</code>
+            );
+          },
+          a: ({ children, href }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline hover:opacity-80">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </span>
+  );
 }
 
 export function ClinicalMarkdownRenderer({ content, className = '' }: ClinicalMarkdownRendererProps) {
@@ -249,16 +326,7 @@ export function ClinicalMarkdownRenderer({ content, className = '' }: ClinicalMa
         rehypePlugins={[
           [
             rehypeKatex,
-            {
-              throwOnError: false,
-              strict: false,
-              trust: true,
-              macros: {
-                '\\odot': '\\odot',
-                '\\oplus': '\\oplus',
-                '\\degree': '^{\\circ}',
-              },
-            },
+            katexOptions,
           ],
         ]}
         components={{

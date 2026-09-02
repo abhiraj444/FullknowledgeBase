@@ -25,7 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import type { KnowledgeTreeNode } from '@/types';
-import ClinicalMarkdownRenderer from './ClinicalMarkdownRenderer';
+import ClinicalMarkdownRenderer, { InlineMarkdownRenderer } from './ClinicalMarkdownRenderer';
 import { SpeechSynthesisButton } from './SpeechSynthesisButton';
 import { VoiceInputButton } from './VoiceInputButton';
 import { useToast } from '@/hooks/use-toast';
@@ -174,7 +174,7 @@ export function KnowledgeStudyStage({
               </span>
             </div>
             <h2 className="text-base sm:text-lg font-bold text-foreground leading-snug">
-              {node.title}
+              <InlineMarkdownRenderer content={node.title} />
             </h2>
           </div>
 
@@ -234,9 +234,9 @@ export function KnowledgeStudyStage({
 
         {/* Node Description / Anchor */}
         {node.description && (
-          <p className="text-xs text-muted-foreground leading-relaxed pt-1">
-            {node.description}
-          </p>
+          <div className="text-xs text-muted-foreground leading-relaxed pt-1">
+            <InlineMarkdownRenderer content={node.description} />
+          </div>
         )}
 
         {node.firstPrincipleAnchor && (
@@ -244,7 +244,9 @@ export function KnowledgeStudyStage({
             <Atom className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
             <div>
               <span className="font-bold">First-Principle Anchor: </span>
-              <span className="italic">{node.firstPrincipleAnchor}</span>
+              <span className="italic">
+                <InlineMarkdownRenderer content={node.firstPrincipleAnchor} />
+              </span>
             </div>
           </div>
         )}

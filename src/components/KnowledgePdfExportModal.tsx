@@ -28,6 +28,7 @@ import {
   FileText,
   Settings2,
   Zap,
+  Lightbulb,
 } from 'lucide-react';
 import type { KnowledgeMapData, KnowledgeTreeNode } from '@/types';
 import { useToast } from '@/hooks/use-toast';
@@ -552,19 +553,54 @@ function cleanMarkdownForPdf(text: string): string {
     .replace(/\$(.*?)\$/g, '$1')
     .replace(/\\\[(.*?)\\\]/gs, '$1')
     .replace(/\\\((.*?)\\\)/g, '$1')
-    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '$1 / $2')
+    .replace(/\\propto\b/g, '∝')
+    .replace(/\\cdot\b/g, '·')
+    .replace(/\\times\b/g, '×')
+    .replace(/\\div\b/g, '÷')
+    .replace(/\\odot\b/g, '☉')
+    .replace(/\\oplus\b/g, '⊕')
+    .replace(/\\Delta\b/g, 'Δ')
+    .replace(/\\pi\b/g, 'π')
+    .replace(/\\theta\b/g, 'θ')
+    .replace(/\\alpha\b/g, 'α')
+    .replace(/\\beta\b/g, 'β')
+    .replace(/\\gamma\b/g, 'γ')
+    .replace(/\\mu\b/g, 'μ')
+    .replace(/\\sigma\b/g, 'σ')
+    .replace(/\\omega\b/g, 'ω')
+    .replace(/\\Omega\b/g, 'Ω')
+    .replace(/\\lambda\b/g, 'λ')
+    .replace(/\\epsilon\b/g, 'ε')
+    .replace(/\\approx\b/g, '≈')
+    .replace(/\\neq?\b/g, '≠')
+    .replace(/\\leq?\b/g, '≤')
+    .replace(/\\geq?\b/g, '≥')
+    .replace(/\\pm\b/g, '±')
+    .replace(/\\infty\b/g, '∞')
+    .replace(/\\partial\b/g, '∂')
+    .replace(/\\nabla\b/g, '∇')
+    .replace(/\\sum\b/g, '∑')
+    .replace(/\\int\b/g, '∫')
+    .replace(/\\in\b/g, '∈')
+    .replace(/\\notin\b/g, '∉')
+    .replace(/\\subset\b/g, '⊂')
+    .replace(/\\subseteq\b/g, '⊆')
+    .replace(/\\sqrt\{([^}]+)\}/g, '√($1)')
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)')
     .replace(/\\text\{([^}]+)\}/g, '$1')
-    .replace(/\\rightarrow/g, '→')
-    .replace(/\\leftarrow/g, '←')
-    .replace(/\\uparrow/g, '↑')
-    .replace(/\\downarrow/g, '↓')
-    .replace(/\\pm/g, '±')
-    .replace(/\\le(q)?/g, '≤')
-    .replace(/\\ge(q)?/g, '≥')
-    .replace(/\\approx/g, '≈')
-    .replace(/\\times/g, '×')
-    .replace(/\\degree/g, '°')
-    .replace(/\\circ/g, '°')
+    .replace(/\\mathrm\{([^}]+)\}/g, '$1')
+    .replace(/\\mathbf\{([^}]+)\}/g, '$1')
+    .replace(/\\textbf\{([^}]+)\}/g, '$1')
+    .replace(/\\rightarrow\b/g, '→')
+    .replace(/\\leftarrow\b/g, '←')
+    .replace(/\\uparrow\b/g, '↑')
+    .replace(/\\downarrow\b/g, '↓')
+    .replace(/\\degree\b/g, '°')
+    .replace(/\\circ\b/g, '°')
+    .replace(/\^2\b/g, '²')
+    .replace(/\^3\b/g, '³')
+    .replace(/_\{([^}]+)\}/g, '_$1')
+    .replace(/\^\{([^}]+)\}/g, '^$1')
     .replace(/\\([a-zA-Z]+)/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -962,6 +998,7 @@ export function KnowledgePdfExportModal({
   const [includeConcise, setIncludeConcise] = useState(true);
   const [includeExplanations, setIncludeExplanations] = useState(true);
   const [includeFirstPrinciples, setIncludeFirstPrinciples] = useState(true);
+  const [includeSimplified, setIncludeSimplified] = useState(true);
   const [includeUserNotes, setIncludeUserNotes] = useState(true);
   const [scope, setScope] = useState<'all' | 'selected'>('all');
   const [activeTab, setActiveTab] = useState<'settings' | 'preview'>('settings');
@@ -1015,19 +1052,7 @@ export function KnowledgePdfExportModal({
         if (currentY + neededHeight > bottomLimit) {
           doc.addPage();
           pageCount += 1;
-          currentY = margin + 4;
-          // Mini running header
-          doc.setFont('NotoSans', 'normal');
-          doc.setFontSize(7.5);
-          doc.setTextColor(148, 163, 184);
-          doc.text(
-            `${knowledgeMap.title || 'Knowledge Study Guide'} • MediGen AI`,
-            margin,
-            currentY - 2
-          );
-          doc.setDrawColor(226, 232, 240);
-          doc.line(margin, currentY, pageWidth - margin, currentY);
-          currentY += 5;
+          currentY = margin;
         }
       };
 
@@ -1258,6 +1283,29 @@ export function KnowledgePdfExportModal({
           });
         }
 
+        // 12-Year-Old (Feynman) Analogy & Simplified Breakdown
+        if (includeSimplified && node.explanation?.simplified) {
+          currentY = renderPdfRichCard({
+            doc,
+            title: '💡 12-Year-Old Analogy (Feynman Intuition):',
+            markdown: node.explanation.simplified,
+            margin,
+            indent,
+            contentWidth,
+            bottomLimit,
+            fillColor: [240, 253, 244], // Light Emerald tint
+            borderColor: [187, 247, 208],
+            titleColor: [22, 101, 52],
+            textColor: [20, 83, 45],
+            fontSize: 7.8,
+            currentY,
+            onPageBreak: () => {
+              checkPageBreak(999);
+              return currentY;
+            },
+          });
+        }
+
         // User Personal Notes
         if (includeUserNotes && node.explanation?.userNotes) {
           const unRaw = stripMarkdown(node.explanation.userNotes);
@@ -1375,6 +1423,7 @@ export function KnowledgePdfExportModal({
       const stdOrConciseText = node.explanation?.standard || node.explanation?.concise;
       const hasExplanation = Boolean(stdOrConciseText);
       const hasFirstPrinciples = Boolean(node.explanation?.firstPrinciples);
+      const hasSimplified = Boolean(node.explanation?.simplified);
       const hasUserNotes = Boolean(node.explanation?.userNotes);
 
       const isRoot = node.depth === 0;
@@ -1487,6 +1536,17 @@ export function KnowledgePdfExportModal({
               <div style="background: #fffdf5; border: 1px solid #fed7aa; border-left: 3px solid #f97316; border-radius: 4px; padding: 8px 10px; margin: 6px 0;">
                 <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #9a3412; margin-bottom: 4px;">🔬 First-Principles Derivation:</div>
                 ${simpleMarkdownToHtml(node.explanation!.firstPrinciples!)}
+              </div>
+            `
+                : ''
+            }
+
+            ${
+              includeSimplified && hasSimplified
+                ? `
+              <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 3px solid #16a34a; border-radius: 4px; padding: 8px 10px; margin: 6px 0;">
+                <div style="font-size: 7.5pt; font-weight: 700; text-transform: uppercase; color: #15803d; margin-bottom: 4px;">💡 12-Year-Old Analogy &amp; Intuitive Breakdown:</div>
+                <div style="color: #14532d;">${simpleMarkdownToHtml(node.explanation!.simplified!)}</div>
               </div>
             `
                 : ''
@@ -1673,6 +1733,7 @@ export function KnowledgePdfExportModal({
     includeConcise,
     includeExplanations,
     includeFirstPrinciples,
+    includeSimplified,
     includeUserNotes,
     noteLineCount,
     rulingStyle,
@@ -1851,6 +1912,21 @@ export function KnowledgePdfExportModal({
                     <Switch
                       checked={includeFirstPrinciples}
                       onCheckedChange={setIncludeFirstPrinciples}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-card/60">
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <Lightbulb className="h-3.5 w-3.5 text-emerald-600" /> 12-Year-Old Analogy
+                      </span>
+                      <p className="text-[10px] text-muted-foreground">
+                        Include intuitive analogies &amp; simplified breakdowns
+                      </p>
+                    </div>
+                    <Switch
+                      checked={includeSimplified}
+                      onCheckedChange={setIncludeSimplified}
                     />
                   </div>
 

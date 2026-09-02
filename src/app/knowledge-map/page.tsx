@@ -53,7 +53,7 @@ import { convertPdfToImages, isPdfFile } from '@/lib/pdf-to-images';
 import { compressImagesForAi, prepareImagesForAiPrompt } from '@/lib/image-compressor';
 import { ImageCompressionOption } from '@/components/ImageCompressionOption';
 import { AiStreamingRawLogBox } from '@/components/AiStreamingRawLogBox';
-import ClinicalMarkdownRenderer from '@/components/ClinicalMarkdownRenderer';
+import ClinicalMarkdownRenderer, { InlineMarkdownRenderer } from '@/components/ClinicalMarkdownRenderer';
 import { KnowledgeNodeCard } from '@/components/KnowledgeNodeCard';
 import { KnowledgeStudyStage } from '@/components/KnowledgeStudyStage';
 import { KnowledgePdfExportModal } from '@/components/KnowledgePdfExportModal';
@@ -995,7 +995,7 @@ function KnowledgeMapContent() {
                 <CardTitle className="text-xs sm:text-sm font-bold flex items-center justify-between text-foreground">
                   <span className="flex items-center gap-1.5">
                     <BookOpen className="h-4 w-4 text-primary" />
-                    Document Synthesis &amp; Primary Themes: &quot;{knowledgeMap.title}&quot;
+                    Document Synthesis &amp; Primary Themes: &quot;<InlineMarkdownRenderer content={knowledgeMap.title} />&quot;
                   </span>
                   <Badge variant="outline" className="text-[10px] font-mono">
                     {totalNodesCount} Topics Dissected
